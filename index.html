@@ -287,6 +287,7 @@
 
 <script>
 const APPS_SCRIPT_URL='https://script.google.com/macros/s/AKfycbwvjlauyYEF9ezPRnVRwuF8vott55Le86df2QyXn_hIvJh-ajUqRe6SgUCr6UXREhgG/exec';
+const SECRET='butce_gizli_anahtar_2024_estiarte';
 
 // ── Categories ────────────────────────────────────────────────────
 const INC_CATEGORIES=[
@@ -351,8 +352,8 @@ const EXP_PALETTE=['#D85A30','#E8794F','#F0997B','#F5B99A','#F9CDB8','#993C1D','
 function setSync(s,m){document.getElementById('sync-dot').className='sync-dot '+s;document.getElementById('sync-text').textContent=m;}
 function renderTodayDate(){document.getElementById('today-date').textContent=new Date().toLocaleDateString('tr-TR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});}
 
-async function remoteRead(){const res=await fetch(APPS_SCRIPT_URL,{redirect:'follow'});if(!res.ok)throw new Error('HTTP '+res.status);const text=await res.text();if(!text||text==='{}')return null;return JSON.parse(text);}
-async function remoteWrite(d){await fetch(APPS_SCRIPT_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'contents='+encodeURIComponent(JSON.stringify(d))});}
+async function remoteRead(){const res=await fetch(APPS_SCRIPT_URL+'?token='+encodeURIComponent(SECRET),{redirect:'follow'});if(!res.ok)throw new Error('HTTP '+res.status);const text=await res.text();if(!text||text==='{}')return null;return JSON.parse(text);}
+async function remoteWrite(d){await fetch(APPS_SCRIPT_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'token='+encodeURIComponent(SECRET)+'&contents='+encodeURIComponent(JSON.stringify(d))});}
 
 async function load(){
   setSync('loading','Veriler yükleniyor...');renderTodayDate();
