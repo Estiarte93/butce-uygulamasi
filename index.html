@@ -854,7 +854,7 @@ load();
 // Register service worker for PWA
 if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{
-    navigator.serviceWorker.register('./sw.js?v=4').then(reg=>{
+    navigator.serviceWorker.register('./sw.js?v=4.1').then(reg=>{
       // Check for updates on every load
       reg.update();
     }).catch(()=>{});
