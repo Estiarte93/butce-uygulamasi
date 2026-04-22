@@ -23,12 +23,23 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  // For Google Apps Script calls (sync) — always go network first
-  if (e.request.url.includes('script.google.com')) {
+  // Google Apps Script — always network
+  if (e.request.url.includes('script.google.com') || e.request.url.includes('exchangerate-api.com')) {
     e.respondWith(fetch(e.request).catch(() => new Response('{}', {headers:{'Content-Type':'application/json'}})));
     return;
   }
-  // For everything else — cache first, fallback to network
+  // HTML pages — network first, fallback to cache (ensures fresh content)
+  if (e.request.mode === 'navigate' || e.request.url.endsWith('.html')) {
+    e.respondWith(
+      fetch(e.request).then(res => {
+        const clone = res.clone();
+        caches.open(CACHE).then(c => c.put(e.request, clone));
+        return res;
+      }).catch(() => caches.match(e.request))
+    );
+    return;
+  }
+  // Other assets — cache first
   e.respondWith(
     caches.match(e.request).then(cached => cached || fetch(e.request).then(res => {
       if (res.ok) {
