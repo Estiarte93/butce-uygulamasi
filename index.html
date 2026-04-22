@@ -158,8 +158,8 @@
     <span id="sync-text">Bağlanıyor...</span>
   </div>
   <div class="tabs">
-    <button class="tab active" onclick="showPage('dashboard',this)">Özet</button>
     <button class="tab" onclick="showPage('wealth',this)">Mal Varlığım</button>
+    <button class="tab active" onclick="showPage('dashboard',this)">Özet</button>
     <button class="tab" onclick="showPage('income',this)">Gelir</button>
     <button class="tab" onclick="showPage('expenses',this)">Gider</button>
   </div>
@@ -899,38 +899,20 @@ function getTotalDebt(){
   return (data.debts||[]).reduce((s,d)=>s+d.amount,0);
 }
 
-// Total wealth changes with income/expense — we track a "flow" balance
-function getFlowBalance(){
+// This month's net: income - expenses for current month
+function getThisMonthNet(){
   const now=new Date();const y=now.getFullYear();const m=now.getMonth();
-  // Sum all income entries ever added (their monthly amount * months active)
-  // Simpler: just sum current month income - expense as a running delta
-  // We'll accumulate all-time: sum all income entries * their active months - all expense entries
-  let incTotal=0,expTotal=0;
-  data.income.forEach(e=>{
-    if(!isEntryActive(e))return;
-    const sy=e.startYear??y;const sm=e.startMonth??0;
-    const startIdx=sy*12+sm;const curIdx=y*12+m;
-    if(!e.recurring){incTotal+=e.amount;return;}
-    const dur=e.duration==='forever'?null:parseInt(e.duration);
-    const months=dur?Math.min(dur,curIdx-startIdx+1):curIdx-startIdx+1;
-    incTotal+=e.amount*Math.max(0,months);
-  });
-  data.expenses.forEach(e=>{
-    if(e.earlyPayRef)return;
-    const sy=e.startYear??y;const sm=e.startMonth??0;
-    const startIdx=sy*12+sm;const curIdx=y*12+m;
-    if(!e.recurring){expTotal+=e.amount;return;}
-    const dur=e.duration==='forever'?null:parseInt(e.duration);
-    const months=dur?Math.min(dur,curIdx-startIdx+1):curIdx-startIdx+1;
-    expTotal+=e.amount*Math.max(0,months);
-  });
-  return incTotal-expTotal;
+  const aI=data.income.filter(e=>isActiveInMonth(e,y,m)&&isEntryActive(e));
+  const aE=data.expenses.filter(e=>isActiveInMonth(e,y,m)&&isEntryActive(e)&&!isHiddenByEarlyPay(e,y,m));
+  const incM=aI.reduce((s,e)=>s+e.amount,0);
+  const expM=aE.reduce((s,e)=>s+e.amount,0);
+  return incM-expM;
 }
 
 function renderWealthSummary(){
   const assetsTRY=getTotalAssetsTRY();
-  const flow=getFlowBalance();
-  const totalAssets=assetsTRY+flow;
+  const monthNet=getThisMonthNet();
+  const totalAssets=assetsTRY+monthNet;
   const totalDebt=getTotalDebt();
   const net=totalAssets-totalDebt;
   document.getElementById('w-total-assets').textContent=fmt(totalAssets);
@@ -941,14 +923,16 @@ function renderWealthSummary(){
 function renderAssets(){
   const el=document.getElementById('assets-list');if(!el)return;
   if(!(data.assets||[]).length){el.innerHTML='<div class="empty">Henüz varlık eklenmedi</div>';return;}
-  const flow=getFlowBalance();
-  const flowEntry=flow!==0?`<div class="entry-row"><div class="debt-row">
-    <div><span class="entry-name">Gelir/Gider akışı<span class="wealth-income-badge">Otomatik</span></span>
-    <div class="entry-meta">Tüm zamanlar gelir - gider toplamı</div></div>
+  const monthNet=getThisMonthNet();
+  const now=new Date();
+  const TR_MONTHS=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+  const flowEntry=`<div class="entry-row"><div class="debt-row">
+    <div><span class="entry-name">${TR_MONTHS[now.getMonth()]} net bakiye<span class="wealth-income-badge">Otomatik</span></span>
+    <div class="entry-meta">Bu ayın gelir − gider farkı</div></div>
     <div></div><div></div>
-    <div class="entry-amount" style="color:${flow>=0?'#1D9E75':'#D85A30'}">${flow>=0?'+':''}${fmt(flow)}</div>
+    <div class="entry-amount" style="color:${monthNet>=0?'#1D9E75':'#D85A30'}">${monthNet>=0?'+':''}${fmt(monthNet)}</div>
     <div></div>
-  </div></div>`:''
+  </div></div>`;
 
   el.innerHTML=data.assets.map(a=>{
     const cat=ASSET_CATEGORIES.find(c=>c.id===a.category)||{label:'Diğer',color:'#888'};
@@ -987,7 +971,10 @@ load();
 // Register service worker for PWA
 if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{
-    navigator.serviceWorker.register('./sw.js').catch(()=>{});
+    navigator.serviceWorker.register('./sw.js').then(reg=>{
+      // Check for updates on every load
+      reg.update();
+    }).catch(()=>{});
   });
 }
 </script>
