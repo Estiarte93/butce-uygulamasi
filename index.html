@@ -899,14 +899,49 @@ function getTotalDebt(){
   return (data.debts||[]).reduce((s,d)=>s+d.amount,0);
 }
 
-// This month's net: income - expenses for current month
+// All-time accumulated net: sum of all months from start to now
 function getThisMonthNet(){
-  const now=new Date();const y=now.getFullYear();const m=now.getMonth();
-  const aI=data.income.filter(e=>isActiveInMonth(e,y,m)&&isEntryActive(e));
-  const aE=data.expenses.filter(e=>isActiveInMonth(e,y,m)&&isEntryActive(e)&&!isHiddenByEarlyPay(e,y,m));
-  const incM=aI.reduce((s,e)=>s+e.amount,0);
-  const expM=aE.reduce((s,e)=>s+e.amount,0);
-  return incM-expM;
+  const now=new Date();
+  const curY=now.getFullYear();const curM=now.getMonth();
+  const curIdx=curY*12+curM;
+  let total=0;
+
+  // For each income entry, sum all months it was active up to and including now
+  data.income.forEach(e=>{
+    if(!isEntryActive(e)&&e.recurring)return;
+    if(!e.recurring){
+      // one-time: count once if in past or current month
+      const eIdx=(e.year??curY)*12+(e.month??curM);
+      if(eIdx<=curIdx) total+=e.amount;
+      return;
+    }
+    const sy=e.startYear??curY;const sm=e.startMonth??0;
+    const startIdx=sy*12+sm;
+    if(startIdx>curIdx)return;
+    const dur=e.duration==='forever'||!e.duration?null:parseInt(e.duration);
+    const endIdx=dur?startIdx+dur-1:curIdx;
+    const activeMonths=Math.min(endIdx,curIdx)-startIdx+1;
+    total+=e.amount*Math.max(0,activeMonths);
+  });
+
+  // For each expense entry, subtract all months it was active up to and including now
+  data.expenses.forEach(e=>{
+    if(e.earlyPayRef)return; // avoid double counting early payments
+    if(!e.recurring){
+      const eIdx=(e.year??curY)*12+(e.month??curM);
+      if(eIdx<=curIdx) total-=e.amount;
+      return;
+    }
+    const sy=e.startYear??curY;const sm=e.startMonth??0;
+    const startIdx=sy*12+sm;
+    if(startIdx>curIdx)return;
+    const dur=e.duration==='forever'||!e.duration?null:parseInt(e.duration);
+    const endIdx=dur?startIdx+dur-1:curIdx;
+    const activeMonths=Math.min(endIdx,curIdx)-startIdx+1;
+    total-=e.amount*Math.max(0,activeMonths);
+  });
+
+  return total;
 }
 
 function renderWealthSummary(){
@@ -927,8 +962,8 @@ function renderAssets(){
   const now=new Date();
   const TR_MONTHS=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
   const flowEntry=`<div class="entry-row"><div class="debt-row">
-    <div><span class="entry-name">${TR_MONTHS[now.getMonth()]} net bakiye<span class="wealth-income-badge">Otomatik</span></span>
-    <div class="entry-meta">Bu ayın gelir − gider farkı</div></div>
+    <div><span class="entry-name">Birikmiş net bakiye<span class="wealth-income-badge">Otomatik</span></span>
+    <div class="entry-meta">Tüm zamanların birikmiş gelir − gider</div></div>
     <div></div><div></div>
     <div class="entry-amount" style="color:${monthNet>=0?'#1D9E75':'#D85A30'}">${monthNet>=0?'+':''}${fmt(monthNet)}</div>
     <div></div>
