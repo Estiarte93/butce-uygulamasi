@@ -149,6 +149,7 @@
     <span id="sync-text">Bağlanıyor...</span>
   </div>
   <div class="tabs">
+    <button class="tab" onclick="showPage('wealth',this)">Mal Varlığı</button>
     <button class="tab active" onclick="showPage('dashboard',this)">Özet</button>
     <button class="tab" onclick="showPage('income',this)">Gelir</button>
     <button class="tab" onclick="showPage('expenses',this)">Gider</button>
@@ -187,6 +188,34 @@
   </div>
 
 
+
+
+  <!-- MAL VARLIĞI -->
+  <div id="page-wealth" class="page">
+
+    <!-- Top summary cards -->
+    <div class="summary-grid">
+      <div class="metric">
+        <div class="metric-label">Toplam birikim</div>
+        <div class="metric-value income" id="wv-total">₺0</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Aylık ortalama</div>
+        <div class="metric-value" id="wv-avg">₺0</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Aktif ay</div>
+        <div class="metric-value" id="wv-months">0</div>
+      </div>
+    </div>
+
+    <!-- Monthly breakdown -->
+    <div class="section">
+      <div class="section-title">Aylara göre net bakiye</div>
+      <div class="entry-list" id="wv-monthly-list"></div>
+    </div>
+
+  </div>
 
   <!-- INCOME -->
   <div id="page-income" class="page">
@@ -713,12 +742,110 @@ function renderPieCharts(){
 }
 
 function renderCharts(){renderBarChart();renderPieCharts();}
-function render(){renderIncomeList();renderExpenseList();renderSummary();renderUpcoming();renderCharts();}
+function render(){renderIncomeList();renderExpenseList();renderSummary();renderUpcoming();renderCharts();renderWealth();}
 
 function showPage(name,el){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');el.classList.add('active');
+}
+
+
+// ── Mal Varlığı ───────────────────────────────────────────────────
+
+function getMonthNet(y, m){
+  const incItems = data.income.filter(e => isActiveInMonth(e,y,m) && isEntryActive(e));
+  const expItems = data.expenses.filter(e => isActiveInMonth(e,y,m) && isEntryActive(e) && !isHiddenByEarlyPay(e,y,m));
+  const inc = incItems.reduce((s,e) => s+e.amount, 0);
+  const exp = expItems.reduce((s,e) => s+e.amount, 0);
+  return inc - exp;
+}
+
+function getWealthMonths(){
+  // Find the earliest month that has any income or expense entry
+  const now = new Date();
+  const curY = now.getFullYear();
+  const curM = now.getMonth();
+
+  let minIdx = curY*12+curM; // start from current month, go back as far as data goes
+
+  const allEntries = [...data.income, ...data.expenses];
+  allEntries.forEach(e => {
+    let ey, em;
+    if(e.recurring){
+      ey = e.startYear ?? curY;
+      em = e.startMonth ?? 0;
+    } else {
+      ey = e.year ?? curY;
+      em = e.month ?? curM;
+    }
+    const idx = ey*12+em;
+    if(idx < minIdx) minIdx = idx;
+  });
+
+  // Build list of months from minIdx to curIdx
+  const months = [];
+  const curIdx = curY*12+curM;
+  for(let idx = minIdx; idx <= curIdx; idx++){
+    const y = Math.floor(idx/12);
+    const m = idx % 12;
+    months.push({y, m});
+  }
+  return months;
+}
+
+function renderWealth(){
+  const months = getWealthMonths();
+  const now = new Date();
+  const curY = now.getFullYear();
+  const curM = now.getMonth();
+
+  if(!months.length){
+    document.getElementById('wv-monthly-list').innerHTML = '<div class="empty">Henüz veri yok</div>';
+    document.getElementById('wv-total').textContent = '₺0';
+    document.getElementById('wv-avg').textContent = '₺0';
+    document.getElementById('wv-months').textContent = '0';
+    return;
+  }
+
+  let cumulative = 0;
+  const rows = months.map(({y,m}) => {
+    const net = getMonthNet(y, m);
+    cumulative += net;
+    const isCurrent = y===curY && m===curM;
+    const isPos = net >= 0;
+    const cumPos = cumulative >= 0;
+    return {y, m, net, cumulative, isCurrent, isPos, cumPos};
+  });
+
+  // Reverse so newest month is at top
+  const rowsDesc = [...rows].reverse();
+
+  const total = cumulative;
+  const avg = months.length > 0 ? total/months.length : 0;
+
+  document.getElementById('wv-total').textContent = fmt(total);
+  document.getElementById('wv-total').className = 'metric-value ' + (total>=0?'income':'expense');
+  document.getElementById('wv-avg').textContent = fmt(avg);
+  document.getElementById('wv-avg').className = 'metric-value ' + (avg>=0?'pos':'neg');
+  document.getElementById('wv-months').textContent = months.length;
+
+  document.getElementById('wv-monthly-list').innerHTML = rowsDesc.map(r => {
+    const monthLabel = TR_MONTHS[r.m] + ' ' + r.y;
+    const currentBadge = r.isCurrent ? '<span class="badge badge-today" style="margin-left:6px">Bu ay</span>' : '';
+    return `<div class="entry-row">
+      <div style="display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center">
+        <div>
+          <span class="entry-name">${monthLabel}</span>${currentBadge}
+          <div class="entry-meta">Birikimli toplam: <span style="font-weight:500;color:${r.cumPos?'#1D9E75':'#D85A30'}">${fmt(r.cumulative)}</span></div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:#aaa;margin-bottom:2px">Aylık net</div>
+          <div class="entry-amount" style="color:${r.isPos?'#1D9E75':'#D85A30'}">${r.isPos?'+':''}${fmt(r.net)}</div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 
