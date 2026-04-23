@@ -464,7 +464,6 @@ function initSelects(){
   buildMonthYearSelects('exp-start-month','exp-start-year');
   buildCategorySelect('inc-category', INC_CATEGORIES, INC_CATEGORIES[0].id);
   buildCategorySelect('exp-category', EXP_CATEGORIES, EXP_CATEGORIES[0].id);
-  initWealthSelects();
 }
 
 function toggleRecurring(p){const cb=document.getElementById(p+'-recurring');cb.checked=!cb.checked;document.getElementById(p+'-recurring-options').classList.toggle('open',cb.checked);}
