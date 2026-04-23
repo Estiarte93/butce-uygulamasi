@@ -1,4 +1,4 @@
-const CACHE = 'butce-v4.1';
+const CACHE = 'butce-v4';
 const ASSETS = [
   '/butce-uygulamasi/',
   '/butce-uygulamasi/index.html',
