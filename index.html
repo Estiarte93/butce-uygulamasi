@@ -516,7 +516,7 @@ function saveEdit(type,id){
   if(recurring){const smEl=document.getElementById('edit-start-month-'+id);const syEl=document.getElementById('edit-start-year-'+id);if(smEl)startMonth=parseInt(smEl.value);if(syEl)startYear=parseInt(syEl.value);const dv=document.getElementById('edit-duration-'+id).value;if(dv==='custom'){const cm=parseInt(document.getElementById('edit-custom-months-'+id).value);duration=isNaN(cm)||cm<1?'forever':String(cm);}else duration=dv;}
   pushUndo();
   arr[idx]={...arr[idx],name,amount,payDay,category,recurring,duration,startMonth,startYear,month:recurring?null:arr[idx].month,year:recurring?null:arr[idx].year};
-  openEditId=null;saveNow();if(type==='income')renderIncomeList();else renderExpenseList();renderSummary();renderCharts();renderUpcoming();
+  openEditId=null;saveNow();if(type==='income')renderIncomeList();else renderExpenseList();renderSummary();renderCharts();renderUpcoming();renderWealth();
 }
 
 function buildRecurringEditBlock(e){
