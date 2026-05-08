@@ -216,6 +216,28 @@ if('serviceWorker' in navigator){
       </div>
     </div>
 
+    <!-- Manuel giriş -->
+    <div class="section">
+      <div class="section-title">Manuel giriş</div>
+      <div class="form-grid">
+        <div><div class="field-label">Açıklama</div><input id="mv-name" type="text" placeholder="örn: Mevcut nakit"/></div>
+        <div>
+          <div class="field-label">Tutar (+ artı, - eksi)</div>
+          <input id="mv-amount" type="number" placeholder="örn: 50000 veya -5000" step="any"/>
+        </div>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+        <button class="btn-add" onclick="addManualEntry()">+ Ekle</button>
+        <span style="font-size:12px;color:#aaa">Pozitif değer ekler, negatif değer çıkarır</span>
+      </div>
+    </div>
+
+    <!-- Manuel girişler listesi -->
+    <div class="section" id="mv-list-section" style="display:none">
+      <div class="section-title">Manuel girişler</div>
+      <div class="entry-list" id="mv-list"></div>
+    </div>
+
     <!-- Monthly breakdown -->
     <div class="section">
       <div class="section-title">Aylara göre net bakiye</div>
@@ -363,7 +385,7 @@ function getCatLabel(type, catId){
   return list.find(c=>c.id===catId)?.label || catId || '—';
 }
 
-let data={income:[],expenses:[],earlyPayments:[]};
+let data={income:[],expenses:[],earlyPayments:[],manualEntries:[]};
 let barChart=null, incPie=null, expPie=null;
 let openEditId=null, saveTimer=null;
 const MAX_UNDO=20; let undoStack=[];
@@ -396,14 +418,14 @@ async function remoteWrite(d){await fetch(APPS_SCRIPT_URL,{method:'POST',mode:'n
 async function load(){
   setSync('loading','Veriler yükleniyor...');renderTodayDate();
   const cache=localStorage.getItem('butce_cache');
-  if(cache){try{const d=JSON.parse(cache);data.income=(d.income||[]).map(migrateEntry);data.expenses=(d.expenses||[]).map(migrateEntry);data.earlyPayments=d.earlyPayments||[];}catch(e){}}
+  if(cache){try{const d=JSON.parse(cache);data.income=(d.income||[]).map(migrateEntry);data.expenses=(d.expenses||[]).map(migrateEntry);data.earlyPayments=d.earlyPayments||[];data.manualEntries=d.manualEntries||[];}catch(e){}}
   initSelects();
   document.getElementById('loading-overlay').style.display='none';
   try{ render(); }catch(e){ console.error('render error:',e); }
   try{
     const remote=await remoteRead();
     if(remote&&remote.income){
-      data.income=(remote.income||[]).map(migrateEntry);data.expenses=(remote.expenses||[]).map(migrateEntry);data.earlyPayments=remote.earlyPayments||[];
+      data.income=(remote.income||[]).map(migrateEntry);data.expenses=(remote.expenses||[]).map(migrateEntry);data.earlyPayments=remote.earlyPayments||[];data.manualEntries=remote.manualEntries||[];
       localStorage.setItem('butce_cache',JSON.stringify(data));render();setSync('ok','Senkronize · '+new Date().toLocaleTimeString('tr-TR'));
     }else if(!cache)setSync('ok','Yeni bütçe oluşturuldu');
     else setSync('ok','Yerel önbellekten yüklendi');
@@ -803,14 +825,16 @@ function getWealthMonths(){
 }
 
 function renderWealth(){
+  renderManualList();
   const months = getWealthMonths();
   const now = new Date();
   const curY = now.getFullYear();
   const curM = now.getMonth();
+  const manualTotal = getManualTotal();
 
-  if(!months.length){
+  if(!months.length && !manualTotal){
     document.getElementById('wv-monthly-list').innerHTML = '<div class="empty">Henüz veri yok</div>';
-    document.getElementById('wv-total').textContent = '₺0';
+    document.getElementById('wv-total').textContent = fmt(manualTotal);
     document.getElementById('wv-avg').textContent = '₺0';
     document.getElementById('wv-months').textContent = '0';
     return;
@@ -826,14 +850,13 @@ function renderWealth(){
     return {y, m, net, cumulative, isCurrent, isPos, cumPos};
   });
 
-  // Reverse so newest month is at top
   const rowsDesc = [...rows].reverse();
+  const incomeExpenseTotal = cumulative;
+  const grandTotal = incomeExpenseTotal + manualTotal;
+  const avg = months.length > 0 ? incomeExpenseTotal/months.length : 0;
 
-  const total = cumulative;
-  const avg = months.length > 0 ? total/months.length : 0;
-
-  document.getElementById('wv-total').textContent = fmt(total);
-  document.getElementById('wv-total').className = 'metric-value ' + (total>=0?'income':'expense');
+  document.getElementById('wv-total').textContent = fmt(grandTotal);
+  document.getElementById('wv-total').className = 'metric-value ' + (grandTotal>=0?'income':'expense');
   document.getElementById('wv-avg').textContent = fmt(avg);
   document.getElementById('wv-avg').className = 'metric-value ' + (avg>=0?'pos':'neg');
   document.getElementById('wv-months').textContent = months.length;
@@ -851,6 +874,65 @@ function renderWealth(){
           <div style="font-size:11px;color:#aaa;margin-bottom:2px">Aylık net</div>
           <div class="entry-amount" style="color:${r.isPos?'#1D9E75':'#D85A30'}">${r.isPos?'+':''}${fmt(r.net)}</div>
         </div>
+      </div>
+    </div>`;
+  }).join('')
+  // Add manual total summary at bottom if any
+  + (manualTotal !== 0 ? `<div class="entry-row">
+      <div style="display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center">
+        <div>
+          <span class="entry-name">Manuel girişler</span>
+          <div class="entry-meta">${(data.manualEntries||[]).length} kayıt</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:#aaa;margin-bottom:2px">Toplam</div>
+          <div class="entry-amount" style="color:${manualTotal>=0?'#1D9E75':'#D85A30'}">${manualTotal>=0?'+':''}${fmt(manualTotal)}</div>
+        </div>
+      </div>
+    </div>` : '');
+}
+
+
+// ── Manuel Varlık Girişleri ───────────────────────────────────────
+function addManualEntry(){
+  const name = document.getElementById('mv-name').value.trim();
+  const amount = parseFloat(document.getElementById('mv-amount').value);
+  if(!name || isNaN(amount) || amount === 0) return;
+  pushUndo();
+  if(!data.manualEntries) data.manualEntries = [];
+  data.manualEntries.push({id: Date.now(), name, amount});
+  document.getElementById('mv-name').value = '';
+  document.getElementById('mv-amount').value = '';
+  saveNow(); renderWealth();
+  showToast((amount > 0 ? '+' : '') + fmt(amount) + ' eklendi');
+}
+
+function deleteManualEntry(id){
+  pushUndo();
+  data.manualEntries = data.manualEntries.filter(e => e.id !== id);
+  saveNow(); renderWealth();
+}
+
+function getManualTotal(){
+  return (data.manualEntries||[]).reduce((s,e) => s+e.amount, 0);
+}
+
+function renderManualList(){
+  const entries = data.manualEntries || [];
+  const section = document.getElementById('mv-list-section');
+  const el = document.getElementById('mv-list');
+  if(!el) return;
+  if(!entries.length){ section.style.display='none'; return; }
+  section.style.display='block';
+  el.innerHTML = entries.map(e => {
+    const isPos = e.amount >= 0;
+    return `<div class="entry-row">
+      <div class="entry-main">
+        <span class="entry-name">${e.name}</span>
+        <div></div>
+        <div class="entry-amount" style="color:${isPos?'#1D9E75':'#D85A30'}">${isPos?'+':''}${fmt(e.amount)}</div>
+        <button class="btn-icon del" onclick="deleteManualEntry(${e.id})" title="Sil">×</button>
+        <div></div>
       </div>
     </div>`;
   }).join('');
