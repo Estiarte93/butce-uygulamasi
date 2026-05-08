@@ -170,7 +170,7 @@ if('serviceWorker' in navigator){
       <div class="metric"><div class="metric-label">Net bakiye</div><div class="metric-value" id="sum-balance">₺0</div></div>
     </div>
     <div class="section">
-      <div class="section-title">Önümüzdeki 7 gün</div>
+      <div class="section-title" id="upcoming-title">Bu ayın ödemeleri</div>
       <div class="entry-list" id="upcoming-list"></div>
     </div>
     <div class="section">
@@ -620,32 +620,33 @@ function renderExpenseList(){renderList('expenses');}
 
 function renderUpcoming(){
   const el=document.getElementById('upcoming-list');if(!el)return;
-  const now=new Date();const curY=now.getFullYear();const curM=now.getMonth();
+  const now=new Date();const curY=now.getFullYear();const curM=now.getMonth();const curD=now.getDate();
   const all=[
-    ...data.income.filter(e=>e.recurring&&e.payDay&&(remainingMonths(e)??1)>0).map(e=>({...e,kind:'income'})),
-    ...data.expenses.filter(e=>e.recurring&&e.payDay&&(remainingMonths(e)??1)>0).map(e=>({...e,kind:'expense'}))
-  ].map(e=>({...e,daysLeft:daysUntil(e.payDay)})).filter(e=>e.daysLeft>=0&&e.daysLeft<=7).sort((a,b)=>a.daysLeft-b.daysLeft);
-  if(!all.length){el.innerHTML='<div class="empty">Önümüzdeki 7 günde ödeme yok</div>';return;}
+    ...data.income.filter(e=>e.recurring&&e.payDay&&isActiveInMonth(e,curY,curM)&&(remainingMonths(e)??1)>0).map(e=>({...e,kind:'income'})),
+    ...data.expenses.filter(e=>e.recurring&&e.payDay&&isActiveInMonth(e,curY,curM)&&(remainingMonths(e)??1)>0&&!isHiddenByEarlyPay(e,curY,curM)).map(e=>({...e,kind:'expense'}))
+  ].sort((a,b)=>a.payDay-b.payDay);
+  if(!all.length){el.innerHTML='<div class="empty">Bu ay tekrarlanan ödeme yok</div>';return;}
   el.innerHTML=all.map(e=>{
     const isInc=e.kind==='income';const color=isInc?'#1D9E75':'#D85A30';
     const paid=isEarlyPaid(e.id,curY,curM);
+    const isPast=e.payDay<curD;const isToday=e.payDay===curD;
     let badge='';
-    if(paid)badge='<span class="badge badge-paid">Ödendi</span>';
-    else if(e.daysLeft===0)badge='<span class="badge badge-today">Bugün</span>';
-    else if(e.daysLeft===1)badge='<span class="badge badge-due">Yarın</span>';
-    else badge=`<span class="badge badge-due">${e.daysLeft} gün sonra</span>`;
+    if(paid) badge='<span class="badge badge-paid">Ödendi</span>';
+    else if(isToday) badge='<span class="badge badge-today">Bugün</span>';
+    else if(isPast) badge='<span class="badge" style="background:#ebebeb;color:#aaa">Geçti</span>';
+    else { const dLeft=e.payDay-curD; badge=dLeft===1?'<span class="badge badge-due">Yarın</span>':`<span class="badge badge-due">${dLeft} gün sonra</span>`; }
     const rem=remainingMonths(e);const remText=rem!=null&&e.duration!=='forever'?` · ${rem} ay kaldı`:'';
-    const payBtn=(!isInc&&!paid)?`<button class="btn-pay" onclick="markEarlyPaid(${e.id})">Bugün ödedim</button>`:(paid?`<span style="font-size:11px;color:#aaa">✓ ödendi</span>`:'<div></div>');
+    const payBtn=(!isInc&&!paid&&!isPast)?`<button class="btn-pay" onclick="markEarlyPaid(${e.id})">Bugün ödedim</button>`:(paid?`<span style="font-size:11px;color:#aaa">✓ ödendi</span>`:'<div></div>');
     const catColor=e.category?getCatColor(e.kind==='income'?'income':'expense',e.category):'#ddd';
     return `<div class="entry-row">
       <div class="upcoming-main">
         <div>
-          <span class="entry-name" style="${paid?'color:#aaa;text-decoration:line-through':''}">
+          <span class="entry-name" style="${paid||isPast?'color:#aaa;':''} ${paid?'text-decoration:line-through':''}">
             <span class="cat-dot" style="background:${catColor}"></span>${e.name}
           </span>${badge}
           <div class="entry-meta">Her ayın ${e.payDay}. günü · ${isInc?'Gelir':'Gider'}${remText}</div>
         </div>
-        <div class="entry-amount" style="color:${paid?'#aaa':color}">${isInc?'+':'−'}${fmt(e.amount)}</div>
+        <div class="entry-amount" style="color:${paid||isPast?'#aaa':color}">${isInc?'+':'−'}${fmt(e.amount)}</div>
         ${payBtn}<div></div>
       </div>
     </div>`;
