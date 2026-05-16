@@ -448,6 +448,21 @@ function migrateEntry(e){
 function isEarlyPaid(entryId,year,month){return(data.earlyPayments||[]).some(p=>p.entryId===entryId&&p.year===year&&p.month===month);}
 function isHiddenByEarlyPay(e,y,m){if(!e.recurring||e.earlyPayRef)return false;return isEarlyPaid(e.id,y,m);}
 
+// Returns true if a recurring income is considered "received" for month y/m
+function isIncomeReceived(e, y, m){
+  if(!e.recurring) return true; // one-time entries always count
+  const now = new Date();
+  const curY = now.getFullYear();
+  const curM = now.getMonth();
+  const curD = now.getDate();
+  const curIdx = curY*12+curM;
+  const entryIdx = y*12+m;
+  if(entryIdx < curIdx) return true;   // past month — always received
+  if(entryIdx > curIdx) return false;  // future month — not received yet
+  // current month: received if payDay <= today
+  return (e.payDay || 1) <= curD;
+}
+
 // Returns true if a recurring expense payment is considered "paid" for month y/m
 // Past months: always paid. Current month: only if payDay <= today. Future months: never paid.
 function isExpensePaid(e, y, m){
@@ -694,7 +709,7 @@ function renderUpcoming(){
 
 function renderSummary(){
   const now=new Date();const y=now.getFullYear();const m=now.getMonth();
-  const aI=data.income.filter(e=>isActiveInMonth(e,y,m)&&isEntryActive(e));
+  const aI=data.income.filter(e=>isActiveInMonth(e,y,m)&&isEntryActive(e)&&isIncomeReceived(e,y,m));
   const aE=data.expenses.filter(e=>isActiveInMonth(e,y,m)&&isEntryActive(e)&&!isHiddenByEarlyPay(e,y,m)&&isExpensePaid(e,y,m));
   const incM=aI.reduce((s,e)=>s+e.amount,0);const expM=aE.reduce((s,e)=>s+e.amount,0);const balM=incM-expM;
   document.getElementById('sum-income').textContent=fmt(incM);
@@ -706,7 +721,7 @@ function renderBarChart(){
   const curY=new Date().getFullYear();const curM=new Date().getMonth();
   const allIncItems=data.income.filter(isEntryActive);
   const allExpItems=data.expenses.filter(e=>isEntryActive(e)&&!e.earlyPayRef);
-  const incDatasets=allIncItems.map((e,i)=>({label:e.name,data:TR_SHORT.map((_,m)=>isActiveInMonth(e,curY,m)?Math.round(e.amount):0),backgroundColor:INC_PALETTE[i%INC_PALETTE.length],stack:'income',borderRadius:3,borderSkipped:false}));
+  const incDatasets=allIncItems.map((e,i)=>({label:e.name,data:TR_SHORT.map((_,m)=>isActiveInMonth(e,curY,m)&&isIncomeReceived(e,curY,m)?Math.round(e.amount):0),backgroundColor:INC_PALETTE[i%INC_PALETTE.length],stack:'income',borderRadius:3,borderSkipped:false}));
   const expDatasets=allExpItems.map((e,i)=>({label:e.name,data:TR_SHORT.map((_,m)=>isActiveInMonth(e,curY,m)&&isExpensePaid(e,curY,m)?Math.round(e.amount):0),backgroundColor:EXP_PALETTE[i%EXP_PALETTE.length],stack:'expense',borderRadius:3,borderSkipped:false}));
   if(barChart)barChart.destroy();
   const ctx=document.getElementById('barChart').getContext('2d');
@@ -726,7 +741,7 @@ function renderPieCharts(){
   const mlabel=document.getElementById('pie-month-label');
   if(mlabel)mlabel.textContent=TR_MONTHS[m]+' '+y+(isCur?' (Bu ay)':'');
 
-  const incItems=data.income.filter(e=>isActiveInMonth(e,y,m)&&isEntryActive(e));
+  const incItems=data.income.filter(e=>isActiveInMonth(e,y,m)&&isEntryActive(e)&&isIncomeReceived(e,y,m));
   const expItems=data.expenses.filter(e=>isActiveInMonth(e,y,m)&&isEntryActive(e)&&!isHiddenByEarlyPay(e,y,m)&&isExpensePaid(e,y,m));
 
   function groupByCategory(items,type){
@@ -801,7 +816,7 @@ function showPage(name,el){
 // ── Mal Varlığı ───────────────────────────────────────────────────
 
 function getMonthNet(y, m){
-  const incItems = data.income.filter(e => isActiveInMonth(e,y,m) && isEntryActive(e));
+  const incItems = data.income.filter(e => isActiveInMonth(e,y,m) && isEntryActive(e) && isIncomeReceived(e,y,m));
   const expItems = data.expenses.filter(e => isActiveInMonth(e,y,m) && isEntryActive(e) && !isHiddenByEarlyPay(e,y,m) && isExpensePaid(e,y,m));
   const inc = incItems.reduce((s,e) => s+e.amount, 0);
   const exp = expItems.reduce((s,e) => s+e.amount, 0);
