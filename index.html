@@ -949,6 +949,24 @@ function getManualTotal(){
   return (data.manualEntries||[]).reduce((s,e) => s+e.amount, 0);
 }
 
+function saveManualEdit(id){
+  const idx = (data.manualEntries||[]).findIndex(e=>e.id===id);
+  if(idx===-1) return;
+  const name = document.getElementById('mv-edit-name-'+id).value.trim();
+  const amount = parseFloat(document.getElementById('mv-edit-amount-'+id).value);
+  if(!name || isNaN(amount) || amount===0) return;
+  pushUndo();
+  data.manualEntries[idx] = {...data.manualEntries[idx], name, amount};
+  saveNow(); renderWealth();
+  showToast('Güncellendi');
+}
+
+function toggleManualEdit(id){
+  const form = document.getElementById('mv-edit-form-'+id);
+  if(!form) return;
+  form.style.display = form.style.display==='none' ? 'block' : 'none';
+}
+
 function renderManualList(){
   const entries = data.manualEntries || [];
   const section = document.getElementById('mv-list-section');
@@ -963,8 +981,18 @@ function renderManualList(){
         <span class="entry-name">${e.name}</span>
         <div></div>
         <div class="entry-amount" style="color:${isPos?'#1D9E75':'#D85A30'}">${isPos?'+':''}${fmt(e.amount)}</div>
+        <button class="btn-icon" onclick="toggleManualEdit(${e.id})" title="Düzenle">✎</button>
         <button class="btn-icon del" onclick="deleteManualEntry(${e.id})" title="Sil">×</button>
-        <div></div>
+      </div>
+      <div id="mv-edit-form-${e.id}" class="edit-form" style="display:none">
+        <div class="edit-grid">
+          <div><div class="field-label">Açıklama</div><input id="mv-edit-name-${e.id}" type="text" value="${e.name}"/></div>
+          <div><div class="field-label">Tutar</div><input id="mv-edit-amount-${e.id}" type="number" value="${e.amount}" step="any"/></div>
+        </div>
+        <div class="edit-actions">
+          <button class="btn-save" onclick="saveManualEdit(${e.id})">Kaydet</button>
+          <button class="btn-cancel" onclick="toggleManualEdit(${e.id})">İptal</button>
+        </div>
       </div>
     </div>`;
   }).join('');
