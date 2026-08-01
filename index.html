@@ -398,10 +398,37 @@ function showToast(msg){const el=document.getElementById('toast');el.textContent
 const _n=new Date();
 let view={inc:{year:_n.getFullYear(),month:_n.getMonth()},exp:{year:_n.getFullYear(),month:_n.getMonth()}};
 let pieView={year:_n.getFullYear(),month:_n.getMonth()};
+let pieAllTime=false;
+
 function changePieMonth(dir){
-  pieView.month+=dir;
-  if(pieView.month>11){pieView.month=0;pieView.year++;}
-  if(pieView.month<0){pieView.month=11;pieView.year--;}
+  const now=new Date();
+  const curY=now.getFullYear();const curM=now.getMonth();
+  if(dir===1){
+    // If currently on current month → switch to all-time view
+    if(!pieAllTime && pieView.year===curY && pieView.month===curM){
+      pieAllTime=true;
+    } else if(pieAllTime){
+      // Already at all-time, do nothing
+      return;
+    } else {
+      pieView.month+=1;
+      if(pieView.month>11){pieView.month=0;pieView.year++;}
+      // Cap at current month
+      if(pieView.year>curY||(pieView.year===curY&&pieView.month>curM)){
+        pieView.year=curY;pieView.month=curM;
+      }
+    }
+  } else {
+    // Going back
+    if(pieAllTime){
+      pieAllTime=false;
+      // Stay on current month
+      pieView.year=curY;pieView.month=curM;
+    } else {
+      pieView.month-=1;
+      if(pieView.month<0){pieView.month=11;pieView.year--;}
+    }
+  }
   renderPieCharts();
 }
 const TR_MONTHS=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
@@ -755,17 +782,55 @@ function renderBarChart(){
 }
 
 function renderPieCharts(){
-  const y=pieView.year;const m=pieView.month;
-  const now=new Date();const isCur=y===now.getFullYear()&&m===now.getMonth();
+  const now=new Date();
+  const curY=now.getFullYear();const curM=now.getMonth();
   const mlabel=document.getElementById('pie-month-label');
-  if(mlabel)mlabel.textContent=TR_MONTHS[m]+' '+y+(isCur?' (Bu ay)':'');
 
-  const incItems=data.income.filter(e=>isActiveInMonth(e,y,m)&&isEntryActive(e)&&isIncomeReceived(e,y,m));
-  const expItems=data.expenses.filter(e=>isActiveInMonth(e,y,m)&&isEntryActive(e)&&!isHiddenByEarlyPay(e,y,m)&&isExpensePaid(e,y,m));
+  // Disable forward button if in all-time mode
+  const btns=document.querySelectorAll('[onclick="changePieMonth(1)"]');
+  btns.forEach(b=>b.style.opacity=pieAllTime?'0.3':'1');
+  btns.forEach(b=>b.style.pointerEvents=pieAllTime?'none':'auto');
+
+  let incItems, expItems;
+
+  if(pieAllTime){
+    if(mlabel) mlabel.textContent='Genel (Tüm Zamanlar)';
+    // Aggregate all months up to now
+    incItems=data.income.filter(e=>isEntryActive(e));
+    expItems=data.expenses.filter(e=>isEntryActive(e)&&!isHiddenByEarlyPay(e,curY,curM));
+    // For all-time, we need to weight by how many months each entry was active
+    // Build virtual flat list with amounts multiplied
+    incItems=buildAllTimeItems(incItems,'income');
+    expItems=buildAllTimeItems(expItems,'expense');
+  } else {
+    const y=pieView.year;const m=pieView.month;
+    const isCur=y===curY&&m===curM;
+    if(mlabel) mlabel.textContent=TR_MONTHS[m]+' '+y+(isCur?' (Bu ay)':'');
+    incItems=data.income.filter(e=>isActiveInMonth(e,y,m)&&isEntryActive(e)&&isIncomeReceived(e,y,m));
+    expItems=data.expenses.filter(e=>isActiveInMonth(e,y,m)&&isEntryActive(e)&&!isHiddenByEarlyPay(e,y,m)&&isExpensePaid(e,y,m));
+  }
+
+  function buildAllTimeItems(items, type){
+    const now=new Date();const curY=now.getFullYear();const curM=now.getMonth();const curIdx=curY*12+curM;
+    return items.map(e=>{
+      if(!e.recurring){return {...e};}
+      const sy=e.startYear??curY;const sm=e.startMonth??0;
+      const startIdx=sy*12+sm;
+      if(startIdx>curIdx)return null;
+      const dur=e.duration==='forever'||!e.duration?null:parseInt(e.duration);
+      const endIdx=dur?startIdx+dur-1:curIdx;
+      const months=Math.min(endIdx,curIdx)-startIdx+1;
+      return {...e, amount: e.amount * Math.max(0,months)};
+    }).filter(Boolean);
+  }
 
   function groupByCategory(items,type){
     const map={};
-    items.forEach(e=>{const catId=e.category||(type==='income'?'diger_gelir':'diger_gider');if(!map[catId])map[catId]=0;map[catId]+=e.amount;});
+    items.forEach(e=>{
+      const catId=e.category||(type==='income'?'diger_gelir':'diger_gider');
+      if(!map[catId])map[catId]=0;
+      map[catId]+=e.amount;
+    });
     return map;
   }
 
@@ -785,20 +850,10 @@ function renderPieCharts(){
     new Chart(ctx,{
       type:'doughnut',
       data:{labels,datasets:[{data:values,backgroundColor:colors,borderWidth:2,borderColor:'#fff',hoverOffset:6}]},
-      options:{
-        responsive:true,maintainAspectRatio:true,cutout:'62%',
-        plugins:{
-          legend:{display:false},
-          tooltip:{
-            enabled:true,
-            backgroundColor:'rgba(26,26,26,0.9)',
-            titleColor:'#fff',bodyColor:'#fff',padding:10,cornerRadius:8,
-            callbacks:{
-              label:ctx=>{
-                const val=ctx.parsed;const pct=Math.round(val/total*100);
-                return `  ${fmt(val)}  (${pct}%)`;
-              }
-            }
+      options:{responsive:true,maintainAspectRatio:true,cutout:'62%',
+        plugins:{legend:{display:false},
+          tooltip:{enabled:true,backgroundColor:'rgba(26,26,26,0.9)',titleColor:'#fff',bodyColor:'#fff',padding:10,cornerRadius:8,
+            callbacks:{label:ctx=>{const val=ctx.parsed;const pct=Math.round(val/total*100);return `  ${fmt(val)}  (${pct}%)`;}}
           }
         }
       }
