@@ -443,7 +443,7 @@ async function remoteRead(){const res=await fetch(APPS_SCRIPT_URL+'?token='+enco
 async function remoteWrite(d){await fetch(APPS_SCRIPT_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'token='+encodeURIComponent(SECRET)+'&contents='+encodeURIComponent(JSON.stringify(d))});}
 
 async function load(){
-  setSync('loading','Veriler yükleniyor...');renderTodayDate();
+  setSync('loading','Veriler yükleniyor...');renderTodayDate();loadFxCache();
   const cache=localStorage.getItem('butce_cache');
   if(cache){try{const d=JSON.parse(cache);data.income=(d.income||[]).map(migrateEntry);data.expenses=(d.expenses||[]).map(migrateEntry);data.earlyPayments=d.earlyPayments||[];data.manualEntries=d.manualEntries||[];}catch(e){}}
   initSelects();
@@ -967,35 +967,50 @@ function renderWealth(){
   document.getElementById('wv-avg').className = 'metric-value ' + (avg>=0?'pos':'neg');
   document.getElementById('wv-months').textContent = months.length;
 
-  document.getElementById('wv-monthly-list').innerHTML = rowsDesc.map(r => {
-    const monthLabel = TR_MONTHS[r.m] + ' ' + r.y;
-    const currentBadge = r.isCurrent ? '<span class="badge badge-today" style="margin-left:6px">Bu ay</span>' : '';
-    return `<div class="entry-row">
-      <div style="display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center">
-        <div>
-          <span class="entry-name">${monthLabel}</span>${currentBadge}
-          <div class="entry-meta">Birikimli toplam: <span style="font-weight:500;color:${r.cumPos?'#1D9E75':'#D85A30'}">${fmt(r.cumulative)}</span></div>
+  // Render initially without USD
+  function buildListHTML(rateMap){
+    return rowsDesc.map(r => {
+      const monthLabel = TR_MONTHS[r.m] + ' ' + r.y;
+      const currentBadge = r.isCurrent ? '<span class="badge badge-today" style="margin-left:6px">Bu ay</span>' : '';
+      const rateKey = `${r.y}-${r.m}`;
+      const rate = rateMap ? rateMap[rateKey] : null;
+      const usdNet = rate ? `<div style="font-size:11px;color:#aaa">${fmtUSD(r.net, rate)}</div>` : '';
+      const usdCum = rate ? ` · <span style="color:#aaa">${fmtUSD(r.cumulative, rate)}</span>` : '';
+      return `<div class="entry-row">
+        <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center">
+          <div>
+            <span class="entry-name">${monthLabel}</span>${currentBadge}
+            <div class="entry-meta">Birikimli toplam: <span style="font-weight:500;color:${r.cumPos?'#1D9E75':'#D85A30'}">${fmt(r.cumulative)}</span>${usdCum}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:11px;color:#aaa;margin-bottom:2px">Aylık net</div>
+            <div class="entry-amount" style="color:${r.isPos?'#1D9E75':'#D85A30'}">${r.isPos?'+':''}${fmt(r.net)}</div>
+            ${usdNet}
+          </div>
         </div>
-        <div style="text-align:right">
-          <div style="font-size:11px;color:#aaa;margin-bottom:2px">Aylık net</div>
-          <div class="entry-amount" style="color:${r.isPos?'#1D9E75':'#D85A30'}">${r.isPos?'+':''}${fmt(r.net)}</div>
+      </div>`;
+    }).join('')
+    + (manualTotal !== 0 ? `<div class="entry-row">
+        <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center">
+          <div>
+            <span class="entry-name">Manuel girişler</span>
+            <div class="entry-meta">${(data.manualEntries||[]).length} kayıt</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:11px;color:#aaa;margin-bottom:2px">Toplam</div>
+            <div class="entry-amount" style="color:${manualTotal>=0?'#1D9E75':'#D85A30'}">${manualTotal>=0?'+':''}${fmt(manualTotal)}</div>
+          </div>
         </div>
-      </div>
-    </div>`;
-  }).join('')
-  // Add manual total summary at bottom if any
-  + (manualTotal !== 0 ? `<div class="entry-row">
-      <div style="display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center">
-        <div>
-          <span class="entry-name">Manuel girişler</span>
-          <div class="entry-meta">${(data.manualEntries||[]).length} kayıt</div>
-        </div>
-        <div style="text-align:right">
-          <div style="font-size:11px;color:#aaa;margin-bottom:2px">Toplam</div>
-          <div class="entry-amount" style="color:${manualTotal>=0?'#1D9E75':'#D85A30'}">${manualTotal>=0?'+':''}${fmt(manualTotal)}</div>
-        </div>
-      </div>
-    </div>` : '');
+      </div>` : '');
+  }
+
+  // Render without rates first (instant)
+  document.getElementById('wv-monthly-list').innerHTML = buildListHTML(null);
+
+  // Then fetch rates and re-render with USD
+  fetchAllMonthRates(months).then(rateMap => {
+    document.getElementById('wv-monthly-list').innerHTML = buildListHTML(rateMap);
+  });
 }
 
 
@@ -1070,6 +1085,67 @@ function renderManualList(){
       </div>
     </div>`;
   }).join('');
+}
+
+
+// ── Tarihi USD Kurları ────────────────────────────────────────────
+let fxCache = {}; // key: "YYYY-MM-DD" → rate (TRY per 1 USD)
+
+function fxCacheKey(y, m){
+  // Last day of the month
+  const lastDay = new Date(y, m+1, 0).getDate();
+  const mm = String(m+1).padStart(2,'0');
+  const dd = String(lastDay).padStart(2,'0');
+  return `${y}-${mm}-${dd}`;
+}
+
+function loadFxCache(){
+  try{
+    const raw = localStorage.getItem('fx_historical');
+    if(raw) fxCache = JSON.parse(raw);
+  }catch(e){}
+}
+
+function saveFxCache(){
+  try{ localStorage.setItem('fx_historical', JSON.stringify(fxCache)); }catch(e){}
+}
+
+async function fetchHistoricalRate(dateStr){
+  if(fxCache[dateStr]) return fxCache[dateStr];
+  try{
+    // Frankfurter.app — free, no key needed
+    const res = await fetch(`https://api.frankfurter.app/${dateStr}?from=USD&to=TRY`);
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const json = await res.json();
+    const rate = json.rates?.TRY;
+    if(rate){ fxCache[dateStr] = rate; saveFxCache(); }
+    return rate || null;
+  }catch(e){ return null; }
+}
+
+async function fetchAllMonthRates(months){
+  const now = new Date();
+  const curY = now.getFullYear(); const curM = now.getMonth();
+  const promises = months.map(async ({y,m}) => {
+    let dateStr = fxCacheKey(y, m);
+    // For current month use today's date
+    if(y===curY && m===curM){
+      const today = now.toISOString().slice(0,10);
+      dateStr = today;
+    }
+    const rate = await fetchHistoricalRate(dateStr);
+    return {key:`${y}-${m}`, rate};
+  });
+  const results = await Promise.all(promises);
+  const map = {};
+  results.forEach(r => { if(r.rate) map[r.key] = r.rate; });
+  return map;
+}
+
+function fmtUSD(tryAmount, rate){
+  if(!rate) return '';
+  const usd = tryAmount / rate;
+  return '$' + usd.toLocaleString('tr-TR', {minimumFractionDigits:0, maximumFractionDigits:0});
 }
 
 
