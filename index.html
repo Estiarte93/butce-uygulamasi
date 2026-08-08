@@ -969,13 +969,18 @@ function renderWealth(){
 
   // Render initially without USD
   function buildListHTML(rateMap){
+    const loading = rateMap === null;
     return rowsDesc.map(r => {
       const monthLabel = TR_MONTHS[r.m] + ' ' + r.y;
       const currentBadge = r.isCurrent ? '<span class="badge badge-today" style="margin-left:6px">Bu ay</span>' : '';
       const rateKey = `${r.y}-${r.m}`;
       const rate = rateMap ? rateMap[rateKey] : null;
-      const usdNet = rate ? `<div style="font-size:11px;color:#aaa">${fmtUSD(r.net, rate)}</div>` : '';
-      const usdCum = rate ? ` · <span style="color:#aaa">${fmtUSD(r.cumulative, rate)}</span>` : '';
+      const usdNet = rate
+        ? `<div style="font-size:11px;color:#2980b9;font-weight:500">${fmtUSD(r.net, rate)}</div>`
+        : (loading ? `<div style="font-size:11px;color:#ccc">$...</div>` : '');
+      const usdCum = rate
+        ? ` · <span style="color:#2980b9;font-weight:500">${fmtUSD(r.cumulative, rate)}</span>`
+        : (loading ? ` · <span style="color:#ccc">$...</span>` : '');
       return `<div class="entry-row">
         <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center">
           <div>
@@ -1112,15 +1117,40 @@ function saveFxCache(){
 
 async function fetchHistoricalRate(dateStr){
   if(fxCache[dateStr]) return fxCache[dateStr];
-  try{
-    // Frankfurter.app — free, no key needed
-    const res = await fetch(`https://api.frankfurter.app/${dateStr}?from=USD&to=TRY`);
-    if(!res.ok) throw new Error('HTTP '+res.status);
-    const json = await res.json();
-    const rate = json.rates?.TRY;
-    if(rate){ fxCache[dateStr] = rate; saveFxCache(); }
-    return rate || null;
-  }catch(e){ return null; }
+  // Try multiple free APIs
+  const apis = [
+    async () => {
+      const res = await fetch(`https://api.frankfurter.app/${dateStr}?from=USD&to=TRY`);
+      if(!res.ok) throw new Error();
+      const j = await res.json();
+      return j.rates?.TRY || null;
+    },
+    async () => {
+      // open.er-api.com — free, supports historical
+      const res = await fetch(`https://open.er-api.com/v6/history/USD/${dateStr.slice(0,4)}/${parseInt(dateStr.slice(5,7))}/${parseInt(dateStr.slice(8,10))}`);
+      if(!res.ok) throw new Error();
+      const j = await res.json();
+      return j.rates?.TRY || null;
+    },
+    async () => {
+      // fawazahmed0 github hosted currency API
+      const res = await fetch(`https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${dateStr}/v1/currencies/usd.json`);
+      if(!res.ok) throw new Error();
+      const j = await res.json();
+      return j.usd?.try || null;
+    }
+  ];
+  for(const api of apis){
+    try{
+      const rate = await api();
+      if(rate){
+        fxCache[dateStr] = rate;
+        saveFxCache();
+        return rate;
+      }
+    }catch(e){}
+  }
+  return null;
 }
 
 async function fetchAllMonthRates(months){
