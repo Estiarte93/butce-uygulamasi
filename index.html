@@ -903,7 +903,7 @@ function getWealthMonths(){
   const curY = now.getFullYear();
   const curM = now.getMonth();
 
-  let minIdx = curY*12+curM; // start from current month, go back as far as data goes
+  let minIdx = curY*12+curM;
 
   const allEntries = [...data.income, ...data.expenses];
   allEntries.forEach(e => {
@@ -920,14 +920,28 @@ function getWealthMonths(){
   });
 
   // Build list of months from minIdx to curIdx
-  const months = [];
   const curIdx = curY*12+curM;
+  const allMonths = [];
   for(let idx = minIdx; idx <= curIdx; idx++){
     const y = Math.floor(idx/12);
     const m = idx % 12;
-    months.push({y, m});
+    allMonths.push({y, m});
   }
-  return months;
+
+  // Skip leading months that have zero net (no actual data)
+  // Find first month with any real activity
+  let firstActiveIdx = 0;
+  for(let i = 0; i < allMonths.length; i++){
+    const {y, m} = allMonths[i];
+    const hasIncome = data.income.some(e => isActiveInMonth(e,y,m) && isEntryActive(e));
+    const hasExpense = data.expenses.some(e => isActiveInMonth(e,y,m) && isEntryActive(e));
+    if(hasIncome || hasExpense){
+      firstActiveIdx = i;
+      break;
+    }
+  }
+
+  return allMonths.slice(firstActiveIdx);
 }
 
 function renderWealth(){
