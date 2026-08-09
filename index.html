@@ -928,17 +928,22 @@ function getWealthMonths(){
     allMonths.push({y, m});
   }
 
-  // Skip leading months that have zero net (no actual data)
-  // Find first month with any real activity
+  // Skip leading months that have zero net AND no actual received income/paid expense
   let firstActiveIdx = 0;
-  for(let i = 0; i < allMonths.length; i++){
+  for(let i = 0; i < allMonths.length - 1; i++){
     const {y, m} = allMonths[i];
-    const hasIncome = data.income.some(e => isActiveInMonth(e,y,m) && isEntryActive(e));
-    const hasExpense = data.expenses.some(e => isActiveInMonth(e,y,m) && isEntryActive(e));
-    if(hasIncome || hasExpense){
+    const net = getMonthNet(y, m);
+    // Also check if any one-time entry was recorded in this month
+    const hasOneTime = [
+      ...data.income.filter(e=>!e.recurring && e.year===y && e.month===m),
+      ...data.expenses.filter(e=>!e.recurring && e.year===y && e.month===m)
+    ].length > 0;
+    if(net !== 0 || hasOneTime){
       firstActiveIdx = i;
       break;
     }
+    // If this is the last iteration and still nothing, start from next
+    firstActiveIdx = i + 1;
   }
 
   return allMonths.slice(firstActiveIdx);
