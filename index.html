@@ -989,27 +989,51 @@ function renderWealth(){
   // Render initially without USD
   function buildListHTML(rateMap){
     const loading = rateMap === null;
+
+    // Pre-calculate cumulative USD for each month (oldest to newest)
+    // cumUSD[i] = sum of usdNet for months[0..i]
+    let usdCumMap = {};
+    if(rateMap){
+      let runningUSD = 0;
+      // rows is oldest→newest, rowsDesc is newest→oldest
+      // iterate rows (oldest first) to accumulate
+      rows.forEach(r => {
+        const rateKey = `${r.y}-${r.m}`;
+        const rate = rateMap[rateKey];
+        const usdNet = rate ? r.net / rate : 0;
+        runningUSD += usdNet;
+        usdCumMap[rateKey] = runningUSD;
+      });
+    }
+
     return rowsDesc.map(r => {
       const monthLabel = TR_MONTHS[r.m] + ' ' + r.y;
       const currentBadge = r.isCurrent ? '<span class="badge badge-today" style="margin-left:6px">Bu ay</span>' : '';
       const rateKey = `${r.y}-${r.m}`;
       const rate = rateMap ? rateMap[rateKey] : null;
-      const usdNet = rate
-        ? `<div style="font-size:11px;color:#2980b9;font-weight:500">${fmtUSD(r.net, rate)}</div>`
+
+      // Aylık net USD — o ayın kendi kuruyla
+      const usdNetVal = rate ? r.net / rate : null;
+      const usdNetStr = usdNetVal !== null
+        ? `<div style="font-size:11px;color:#2980b9;font-weight:500">${usdNetVal>=0?'+':''}$${Math.round(Math.abs(usdNetVal)).toLocaleString('tr-TR')}</div>`
         : (loading ? `<div style="font-size:11px;color:#ccc">$...</div>` : '');
-      const usdCum = rate
-        ? ` · <span style="color:#2980b9;font-weight:500">${fmtUSD(r.cumulative, rate)}</span>`
+
+      // Birikimli USD — her ayın kendi kuruyla hesaplanan USD değerlerinin toplamı
+      const usdCumVal = rateMap ? usdCumMap[rateKey] : null;
+      const usdCumStr = usdCumVal !== null
+        ? ` · <span style="color:#2980b9;font-weight:500">${usdCumVal>=0?'':'-'}$${Math.round(Math.abs(usdCumVal)).toLocaleString('tr-TR')}</span>`
         : (loading ? ` · <span style="color:#ccc">$...</span>` : '');
+
       return `<div class="entry-row">
         <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center">
           <div>
             <span class="entry-name">${monthLabel}</span>${currentBadge}
-            <div class="entry-meta">Birikimli toplam: <span style="font-weight:500;color:${r.cumPos?'#1D9E75':'#D85A30'}">${fmt(r.cumulative)}</span>${usdCum}</div>
+            <div class="entry-meta">Birikimli toplam: <span style="font-weight:500;color:${r.cumPos?'#1D9E75':'#D85A30'}">${fmt(r.cumulative)}</span>${usdCumStr}</div>
           </div>
           <div style="text-align:right">
             <div style="font-size:11px;color:#aaa;margin-bottom:2px">Aylık net</div>
             <div class="entry-amount" style="color:${r.isPos?'#1D9E75':'#D85A30'}">${r.isPos?'+':''}${fmt(r.net)}</div>
-            ${usdNet}
+            ${usdNetStr}
           </div>
         </div>
       </div>`;
