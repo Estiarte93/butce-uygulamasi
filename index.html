@@ -684,7 +684,9 @@ function renderList(type){
   const isCur=vY===now.getFullYear()&&vM===now.getMonth();
   document.getElementById(p+'-month-label').textContent=TR_MONTHS[vM]+' '+vY+(isCur?' (Bu ay)':'');
   const items=arr.filter(e=>isActiveInMonth(e,vY,vM)&&!isHiddenByEarlyPay(e,vY,vM));
-  const active=items.filter(isEntryActive);const ended=items.filter(e=>!isEntryActive(e));
+  // isEntryActive only affects badge display, not inclusion in list
+  const active=items.filter(e=>isEntryActive(e)||vY*12+vM<new Date().getFullYear()*12+new Date().getMonth());
+  const ended=items.filter(e=>!isEntryActive(e)&&vY*12+vM>=new Date().getFullYear()*12+new Date().getMonth());
   const total=active.reduce((s,e)=>s+e.amount,0);
   document.getElementById(p+'-month-total').textContent=items.length?`Toplam: ${fmt(total)}`:'';
   if(!items.length){listEl.innerHTML=`<div class="empty">Bu ay ${type==='income'?'gelir':'gider'} yok</div>`;return;}
@@ -736,8 +738,8 @@ function renderUpcoming(){
 
 function renderSummary(){
   const now=new Date();const y=now.getFullYear();const m=now.getMonth();
-  const aI=data.income.filter(e=>isActiveInMonth(e,y,m)&&isEntryActive(e)&&isIncomeReceived(e,y,m));
-  const aE=data.expenses.filter(e=>isActiveInMonth(e,y,m)&&isEntryActive(e)&&!isHiddenByEarlyPay(e,y,m)&&isExpensePaid(e,y,m));
+  const aI=data.income.filter(e=>isActiveInMonth(e,y,m)&&isIncomeReceived(e,y,m));
+  const aE=data.expenses.filter(e=>isActiveInMonth(e,y,m)&&!isHiddenByEarlyPay(e,y,m)&&isExpensePaid(e,y,m));
   const incM=aI.reduce((s,e)=>s+e.amount,0);const expM=aE.reduce((s,e)=>s+e.amount,0);const balM=incM-expM;
   document.getElementById('sum-income').textContent=fmt(incM);
   document.getElementById('sum-expense').textContent=fmt(expM);
@@ -749,11 +751,11 @@ function renderBarChart(){
 
   // Single bar per month — total income and total expense
   const incData=TR_SHORT.map((_,m)=>{
-    const items=data.income.filter(e=>isActiveInMonth(e,curY,m)&&isEntryActive(e)&&isIncomeReceived(e,curY,m));
+    const items=data.income.filter(e=>isActiveInMonth(e,curY,m)&&isIncomeReceived(e,curY,m));
     return Math.round(items.reduce((s,e)=>s+e.amount,0));
   });
   const expData=TR_SHORT.map((_,m)=>{
-    const items=data.expenses.filter(e=>isActiveInMonth(e,curY,m)&&isEntryActive(e)&&!isHiddenByEarlyPay(e,curY,m)&&isExpensePaid(e,curY,m));
+    const items=data.expenses.filter(e=>isActiveInMonth(e,curY,m)&&!isHiddenByEarlyPay(e,curY,m)&&isExpensePaid(e,curY,m));
     return Math.round(items.reduce((s,e)=>s+e.amount,0));
   });
 
@@ -806,8 +808,8 @@ function renderPieCharts(){
     const y=pieView.year;const m=pieView.month;
     const isCur=y===curY&&m===curM;
     if(mlabel) mlabel.textContent=TR_MONTHS[m]+' '+y+(isCur?' (Bu ay)':'');
-    incItems=data.income.filter(e=>isActiveInMonth(e,y,m)&&isEntryActive(e)&&isIncomeReceived(e,y,m));
-    expItems=data.expenses.filter(e=>isActiveInMonth(e,y,m)&&isEntryActive(e)&&!isHiddenByEarlyPay(e,y,m)&&isExpensePaid(e,y,m));
+    incItems=data.income.filter(e=>isActiveInMonth(e,y,m)&&isIncomeReceived(e,y,m));
+    expItems=data.expenses.filter(e=>isActiveInMonth(e,y,m)&&!isHiddenByEarlyPay(e,y,m)&&isExpensePaid(e,y,m));
   }
 
   function buildAllTimeItems(items, type){
@@ -890,8 +892,8 @@ function showPage(name,el){
 // ── Mal Varlığı ───────────────────────────────────────────────────
 
 function getMonthNet(y, m){
-  const incItems = data.income.filter(e => isActiveInMonth(e,y,m) && isEntryActive(e) && isIncomeReceived(e,y,m));
-  const expItems = data.expenses.filter(e => isActiveInMonth(e,y,m) && isEntryActive(e) && !isHiddenByEarlyPay(e,y,m) && isExpensePaid(e,y,m));
+  const incItems = data.income.filter(e => isActiveInMonth(e,y,m) && isIncomeReceived(e,y,m));
+  const expItems = data.expenses.filter(e => isActiveInMonth(e,y,m) && !isHiddenByEarlyPay(e,y,m) && isExpensePaid(e,y,m));
   const inc = incItems.reduce((s,e) => s+e.amount, 0);
   const exp = expItems.reduce((s,e) => s+e.amount, 0);
   return inc - exp;
