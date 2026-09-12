@@ -797,13 +797,9 @@ function renderPieCharts(){
 
   if(pieAllTime){
     if(mlabel) mlabel.textContent='Genel (Tüm Zamanlar)';
-    // Aggregate all months up to now
-    incItems=data.income.filter(e=>isEntryActive(e));
-    expItems=data.expenses.filter(e=>isEntryActive(e)&&!isHiddenByEarlyPay(e,curY,curM));
-    // For all-time, we need to weight by how many months each entry was active
-    // Build virtual flat list with amounts multiplied
-    incItems=buildAllTimeItems(incItems,'income');
-    expItems=buildAllTimeItems(expItems,'expense');
+    // Include ALL entries — even expired ones count for past months
+    incItems=buildAllTimeItems(data.income,'income');
+    expItems=buildAllTimeItems(data.expenses.filter(e=>!e.earlyPayRef),'expense');
   } else {
     const y=pieView.year;const m=pieView.month;
     const isCur=y===curY&&m===curM;
@@ -815,13 +811,19 @@ function renderPieCharts(){
   function buildAllTimeItems(items, type){
     const now=new Date();const curY=now.getFullYear();const curM=now.getMonth();const curIdx=curY*12+curM;
     return items.map(e=>{
-      if(!e.recurring){return {...e};}
+      if(!e.recurring){
+        // One-time: include only if in the past or current month
+        const eIdx=(e.year??curY)*12+(e.month??curM);
+        if(eIdx>curIdx) return null;
+        return {...e};
+      }
       const sy=e.startYear??curY;const sm=e.startMonth??0;
       const startIdx=sy*12+sm;
       if(startIdx>curIdx)return null;
       const dur=e.duration==='forever'||!e.duration?null:parseInt(e.duration);
-      const endIdx=dur?startIdx+dur-1:curIdx;
-      const months=Math.min(endIdx,curIdx)-startIdx+1;
+      // endIdx: either duration end or current month, whichever is earlier
+      const endIdx=dur?Math.min(startIdx+dur-1,curIdx):curIdx;
+      const months=endIdx-startIdx+1;
       return {...e, amount: e.amount * Math.max(0,months)};
     }).filter(Boolean);
   }
