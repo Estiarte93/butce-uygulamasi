@@ -156,6 +156,7 @@ if('serviceWorker' in navigator){
     <span id="sync-text">Bağlanıyor...</span>
   </div>
   <div class="tabs">
+    <button class="tab" onclick="showPage('assets',this)">Assets</button>
     <button class="tab" onclick="showPage('wealth',this)">Mal Varlığı</button>
     <button class="tab active" onclick="showPage('dashboard',this)">Özet</button>
     <button class="tab" onclick="showPage('income',this)">Gelir</button>
@@ -196,6 +197,56 @@ if('serviceWorker' in navigator){
 
 
 
+
+
+  <!-- ASSETS -->
+  <div id="page-assets" class="page">
+
+    <!-- Market rates bar -->
+    <div class="section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem">
+        <div class="section-title" style="margin-bottom:0">Güncel Kurlar</div>
+        <button class="btn-nav" onclick="fetchAssetRates()" style="width:auto;padding:0 10px;font-size:12px">↻ Güncelle</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px" id="asset-rates-bar">
+        <div class="metric"><div class="metric-label">USD/TRY</div><div style="font-size:16px;font-weight:500" id="ar-usd">—</div></div>
+        <div class="metric"><div class="metric-label">Altın (USD/gr)</div><div style="font-size:16px;font-weight:500" id="ar-gold">—</div></div>
+        <div class="metric"><div class="metric-label">Son güncelleme</div><div style="font-size:12px;color:#aaa;margin-top:4px" id="ar-time">—</div></div>
+      </div>
+    </div>
+
+    <!-- Total + Pie -->
+    <div class="summary-grid" style="grid-template-columns:1fr 1fr">
+      <div class="metric"><div class="metric-label">Toplam (USD)</div><div class="metric-value income" id="at-total">$0</div></div>
+      <div class="metric"><div class="metric-label">Toplam (TRY)</div><div class="metric-value" id="at-total-try">₺0</div></div>
+    </div>
+
+    <!-- Pie + Legend -->
+    <div class="section">
+      <div class="section-title">Dağılım</div>
+      <div style="display:flex;gap:1.5rem;align-items:flex-start;flex-wrap:wrap">
+        <div style="width:180px;height:180px;flex-shrink:0"><canvas id="assetPieChart"></canvas></div>
+        <div style="flex:1;min-width:160px" id="asset-pie-legend"></div>
+      </div>
+    </div>
+
+    <!-- Input form -->
+    <div class="section">
+      <div class="section-title">Varlık Güncelle</div>
+      <div style="display:flex;flex-direction:column;gap:10px" id="asset-inputs"></div>
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+        <button class="btn-add" onclick="saveAssets()">Kaydet</button>
+        <span style="font-size:12px;color:#aaa">Değerleri girip kaydet — anlık snapshot otomatik alınır</span>
+      </div>
+    </div>
+
+    <!-- Monthly chart -->
+    <div class="section">
+      <div class="section-title">Aylık gelişim (USD)</div>
+      <div style="position:relative;height:220px"><canvas id="assetLineChart"></canvas></div>
+    </div>
+
+  </div>
 
   <!-- MAL VARLIĞI -->
   <div id="page-wealth" class="page">
@@ -385,7 +436,7 @@ function getCatLabel(type, catId){
   return list.find(c=>c.id===catId)?.label || catId || '—';
 }
 
-let data={income:[],expenses:[],earlyPayments:[],manualEntries:[]};
+let data={income:[],expenses:[],earlyPayments:[],manualEntries:[],assetValues:{},assetSnapshots:{}};
 let barChart=null, incPie=null, expPie=null;
 let openEditId=null, saveTimer=null;
 const MAX_UNDO=20; let undoStack=[];
@@ -443,17 +494,17 @@ async function remoteRead(){const res=await fetch(APPS_SCRIPT_URL+'?token='+enco
 async function remoteWrite(d){await fetch(APPS_SCRIPT_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'token='+encodeURIComponent(SECRET)+'&contents='+encodeURIComponent(JSON.stringify(d))});}
 
 async function load(){
-  setSync('loading','Veriler yükleniyor...');renderTodayDate();loadFxCache();
+  setSync('loading','Veriler yükleniyor...');renderTodayDate();loadFxCache();loadAssetRatesCache();
   const cache=localStorage.getItem('butce_cache');
-  if(cache){try{const d=JSON.parse(cache);data.income=(d.income||[]).map(migrateEntry);data.expenses=(d.expenses||[]).map(migrateEntry);data.earlyPayments=d.earlyPayments||[];data.manualEntries=d.manualEntries||[];}catch(e){}}
+  if(cache){try{const d=JSON.parse(cache);data.income=(d.income||[]).map(migrateEntry);data.expenses=(d.expenses||[]).map(migrateEntry);data.earlyPayments=d.earlyPayments||[];data.manualEntries=d.manualEntries||[];data.assetValues=d.assetValues||{};data.assetSnapshots=d.assetSnapshots||{};}catch(e){}}
   initSelects();
   document.getElementById('loading-overlay').style.display='none';
   try{ render(); }catch(e){ console.error('render error:',e); }
   try{
     const remote=await remoteRead();
     if(remote&&remote.income){
-      data.income=(remote.income||[]).map(migrateEntry);data.expenses=(remote.expenses||[]).map(migrateEntry);data.earlyPayments=remote.earlyPayments||[];data.manualEntries=remote.manualEntries||[];
-      localStorage.setItem('butce_cache',JSON.stringify(data));render();setSync('ok','Senkronize · '+new Date().toLocaleTimeString('tr-TR'));
+      data.income=(remote.income||[]).map(migrateEntry);data.expenses=(remote.expenses||[]).map(migrateEntry);data.earlyPayments=remote.earlyPayments||[];data.manualEntries=remote.manualEntries||[];data.assetValues=remote.assetValues||{};data.assetSnapshots=remote.assetSnapshots||{};
+      localStorage.setItem('butce_cache',JSON.stringify(data));render();setSync('ok','Senkronize · '+new Date().toLocaleTimeString('tr-TR'));fetchAssetRates();
     }else if(!cache)setSync('ok','Yeni bütçe oluşturuldu');
     else setSync('ok','Yerel önbellekten yüklendi');
   }catch(e){setSync('err','Çevrimdışı mod');}
@@ -882,7 +933,7 @@ function renderPieCharts(){
 }
 
 function renderCharts(){renderBarChart();renderPieCharts();}
-function render(){renderIncomeList();renderExpenseList();renderSummary();renderUpcoming();renderCharts();renderWealth();}
+function render(){renderIncomeList();renderExpenseList();renderSummary();renderUpcoming();renderCharts();renderWealth();renderAssets();}
 
 function showPage(name,el){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -1223,6 +1274,254 @@ function fmtUSD(tryAmount, rate){
   if(!rate) return '';
   const usd = tryAmount / rate;
   return '$' + usd.toLocaleString('tr-TR', {minimumFractionDigits:0, maximumFractionDigits:0});
+}
+
+
+// ── ASSETS ───────────────────────────────────────────────────────
+
+const ASSET_CATS = [
+  {id:'tl',       label:'TL',        color:'#1D9E75', currency:'TRY', unit:'₺', placeholder:'örn: 50000'},
+  {id:'usd',      label:'USD',       color:'#2980b9', currency:'USD', unit:'$', placeholder:'örn: 5000'},
+  {id:'altin',    label:'Altın',     color:'#d4ac0d', currency:'GOLD',unit:'gr',placeholder:'örn: 50 (gram)'},
+  {id:'eurobond', label:'Eurobond',  color:'#8e44ad', currency:'USD', unit:'$', placeholder:'örn: 10000'},
+  {id:'ibkr',     label:'IBKR',      color:'#c0392b', currency:'USD', unit:'$', placeholder:'örn: 25000'},
+];
+
+let assetRates = {usdtry: null, goldUSD: null, updatedAt: null};
+let assetLineChart = null;
+let assetPieChartObj = null;
+
+function loadAssetRatesCache(){
+  try{
+    const r = localStorage.getItem('asset_rates_cache');
+    if(r){ assetRates = JSON.parse(r); renderAssetRatesBar(); }
+  }catch(e){}
+}
+
+function saveAssetRatesCache(){
+  try{ localStorage.setItem('asset_rates_cache', JSON.stringify(assetRates)); }catch(e){}
+}
+
+async function fetchAssetRates(){
+  document.getElementById('ar-usd').textContent = '...';
+  document.getElementById('ar-gold').textContent = '...';
+  try{
+    // USD/TRY
+    const fx = await fetch('https://api.frankfurter.app/latest?from=USD&to=TRY');
+    if(fx.ok){
+      const fxj = await fx.json();
+      assetRates.usdtry = fxj.rates?.TRY || null;
+    }
+  }catch(e){}
+  try{
+    // Gold price in USD per troy oz → convert to per gram (/31.1035)
+    const gold = await fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/xau.json');
+    if(gold.ok){
+      const gj = await gold.json();
+      const xauUSD = gj.xau?.usd || null; // USD per 1 XAU (troy oz)
+      assetRates.goldUSD = xauUSD ? xauUSD / 31.1035 : null; // per gram
+    }
+  }catch(e){}
+  assetRates.updatedAt = new Date().toLocaleTimeString('tr-TR');
+  saveAssetRatesCache();
+  renderAssetRatesBar();
+  renderAssetSummary();
+}
+
+function renderAssetRatesBar(){
+  const usdEl = document.getElementById('ar-usd');
+  const goldEl = document.getElementById('ar-gold');
+  const timeEl = document.getElementById('ar-time');
+  if(usdEl) usdEl.textContent = assetRates.usdtry ? assetRates.usdtry.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
+  if(goldEl) goldEl.textContent = assetRates.goldUSD ? '$'+assetRates.goldUSD.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
+  if(timeEl) timeEl.textContent = assetRates.updatedAt || '—';
+}
+
+function getAssetData(){
+  return data.assetValues || {};
+}
+
+function toUSD(catId, amount){
+  if(catId === 'tl'){
+    if(!assetRates.usdtry || !amount) return 0;
+    return amount / assetRates.usdtry;
+  }
+  if(catId === 'altin'){
+    if(!assetRates.goldUSD || !amount) return 0;
+    return amount * assetRates.goldUSD;
+  }
+  return amount || 0; // USD, Eurobond, IBKR already in USD
+}
+
+function getTotalUSD(){
+  const vals = getAssetData();
+  return ASSET_CATS.reduce((s,cat) => s + toUSD(cat.id, vals[cat.id] || 0), 0);
+}
+
+function initAssetInputs(){
+  const el = document.getElementById('asset-inputs');
+  if(!el) return;
+  const vals = getAssetData();
+  el.innerHTML = ASSET_CATS.map(cat => `
+    <div style="display:grid;grid-template-columns:120px 1fr;gap:8px;align-items:center">
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="width:10px;height:10px;border-radius:2px;background:${cat.color};display:inline-block;flex-shrink:0"></span>
+        <span style="font-size:14px;font-weight:500">${cat.label}</span>
+        <span style="font-size:11px;color:#aaa">(${cat.unit})</span>
+      </div>
+      <input id="ai-${cat.id}" type="number" min="0" step="any"
+        value="${vals[cat.id] || ''}"
+        placeholder="${cat.placeholder}"
+        style="height:36px;padding:0 10px;font-size:14px;border:0.5px solid #ccc;border-radius:8px;background:#fff;color:#1a1a1a;width:100%"/>
+    </div>`).join('');
+}
+
+function saveAssets(){
+  if(!data.assetValues) data.assetValues = {};
+  ASSET_CATS.forEach(cat => {
+    const el = document.getElementById('ai-'+cat.id);
+    if(!el) return;
+    const v = parseFloat(el.value);
+    data.assetValues[cat.id] = isNaN(v) ? 0 : v;
+  });
+  // Auto snapshot
+  takeAssetSnapshot();
+  saveNow();
+  renderAssetSummary();
+  showToast('Assets kaydedildi');
+}
+
+function takeAssetSnapshot(){
+  if(!data.assetSnapshots) data.assetSnapshots = {};
+  const now = new Date();
+  const key = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`; // month key
+  const totalUSD = getTotalUSD();
+  if(totalUSD > 0){
+    data.assetSnapshots[key] = {
+      totalUSD,
+      values: {...(data.assetValues||{})},
+      rates: {...assetRates},
+      savedAt: now.toISOString()
+    };
+  }
+}
+
+function renderAssetSummary(){
+  const totalUSD = getTotalUSD();
+  const totalTRY = assetRates.usdtry ? totalUSD * assetRates.usdtry : 0;
+  const totalEl = document.getElementById('at-total');
+  const tryEl = document.getElementById('at-total-try');
+  if(totalEl) totalEl.textContent = '$'+Math.round(totalUSD).toLocaleString('tr-TR');
+  if(tryEl) tryEl.textContent = totalTRY ? '₺'+Math.round(totalTRY).toLocaleString('tr-TR') : '—';
+
+  renderAssetPie();
+  renderAssetLine();
+  initAssetInputs();
+}
+
+function renderAssetPie(){
+  const vals = getAssetData();
+  const entries = ASSET_CATS.map(cat => ({
+    label: cat.label,
+    color: cat.color,
+    usd: toUSD(cat.id, vals[cat.id] || 0)
+  })).filter(e => e.usd > 0);
+
+  const legendEl = document.getElementById('asset-pie-legend');
+  const total = entries.reduce((s,e) => s+e.usd, 0);
+
+  if(!entries.length){
+    if(legendEl) legendEl.innerHTML = '<div class="empty">Veri yok</div>';
+    const old = Chart.getChart('assetPieChart'); if(old) old.destroy();
+    return;
+  }
+
+  const old = Chart.getChart('assetPieChart'); if(old) old.destroy();
+  const ctx = document.getElementById('assetPieChart')?.getContext('2d');
+  if(!ctx) return;
+
+  new Chart(ctx,{
+    type:'doughnut',
+    data:{
+      labels: entries.map(e=>e.label),
+      datasets:[{data: entries.map(e=>Math.round(e.usd)), backgroundColor: entries.map(e=>e.color), borderWidth:2, borderColor:'#fff', hoverOffset:6}]
+    },
+    options:{responsive:true,maintainAspectRatio:true,cutout:'60%',
+      plugins:{legend:{display:false},
+        tooltip:{enabled:true,backgroundColor:'rgba(26,26,26,0.9)',titleColor:'#fff',bodyColor:'#fff',padding:10,cornerRadius:8,
+          callbacks:{label:ctx=>`  $${Math.round(ctx.parsed).toLocaleString('tr-TR')}  (${Math.round(ctx.parsed/total*100)}%)`}
+        }
+      }
+    }
+  });
+
+  if(legendEl){
+    legendEl.innerHTML = entries.map(e => `
+      <div class="pie-legend-item">
+        <div class="pie-legend-left">
+          <span class="pie-legend-dot" style="background:${e.color}"></span>
+          <span>${e.label}</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="pie-legend-pct">${Math.round(e.usd/total*100)}%</span>
+          <span style="font-size:11px;font-weight:500;color:#1a1a1a">$${Math.round(e.usd).toLocaleString('tr-TR')}</span>
+        </div>
+      </div>`).join('')
+    + `<div class="pie-total-bar">
+        <span style="font-size:12px;font-weight:500;color:#666">Toplam</span>
+        <span style="font-size:13px;font-weight:500;color:#1a1a1a">$${Math.round(total).toLocaleString('tr-TR')}</span>
+       </div>`;
+  }
+}
+
+function renderAssetLine(){
+  const snapshots = data.assetSnapshots || {};
+  const keys = Object.keys(snapshots).sort();
+  if(keys.length < 1){
+    const old = Chart.getChart('assetLineChart'); if(old) old.destroy();
+    return;
+  }
+
+  const labels = keys.map(k => {
+    const [y,m] = k.split('-');
+    return TR_MONTHS[parseInt(m)-1].slice(0,3)+' '+y;
+  });
+  const values = keys.map(k => Math.round(snapshots[k].totalUSD));
+
+  const old = Chart.getChart('assetLineChart'); if(old) old.destroy();
+  const ctx = document.getElementById('assetLineChart')?.getContext('2d');
+  if(!ctx) return;
+
+  new Chart(ctx,{
+    type:'line',
+    data:{labels, datasets:[{
+      label:'Toplam (USD)',
+      data: values,
+      borderColor:'#2980b9',
+      backgroundColor:'rgba(41,128,185,0.08)',
+      borderWidth:2,
+      pointBackgroundColor:'#2980b9',
+      pointRadius:4,
+      tension:0.3,
+      fill:true
+    }]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},
+        tooltip:{backgroundColor:'rgba(26,26,26,0.9)',titleColor:'#fff',bodyColor:'#fff',padding:10,cornerRadius:8,
+          callbacks:{label:ctx=>' $'+ctx.parsed.y.toLocaleString('tr-TR')}
+        }
+      },
+      scales:{
+        x:{grid:{display:false},ticks:{font:{size:11},color:'#888'}},
+        y:{grid:{color:'rgba(0,0,0,0.06)'},ticks:{font:{size:11},color:'#888',callback:v=>'$'+v.toLocaleString('tr-TR')}}
+      }
+    }
+  });
+}
+
+function renderAssets(){
+  renderAssetRatesBar();
+  renderAssetSummary();
 }
 
 
