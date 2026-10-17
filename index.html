@@ -1303,25 +1303,60 @@ function saveAssetRatesCache(){
 }
 
 async function fetchAssetRates(){
-  document.getElementById('ar-usd').textContent = '...';
-  document.getElementById('ar-gold').textContent = '...';
-  try{
-    // USD/TRY
-    const fx = await fetch('https://api.frankfurter.app/latest?from=USD&to=TRY');
-    if(fx.ok){
-      const fxj = await fx.json();
-      assetRates.usdtry = fxj.rates?.TRY || null;
+  const usdEl = document.getElementById('ar-usd');
+  const goldEl = document.getElementById('ar-gold');
+  if(usdEl) usdEl.textContent = '...';
+  if(goldEl) goldEl.textContent = '...';
+
+  // USD/TRY — try multiple sources
+  const usdApis = [
+    async () => {
+      const r = await fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json');
+      const j = await r.json();
+      return j.usd?.try || null;
+    },
+    async () => {
+      const r = await fetch('https://latest.currency-api.pages.dev/v1/currencies/usd.json');
+      const j = await r.json();
+      return j.usd?.try || null;
+    },
+    async () => {
+      const r = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
+      const j = await r.json();
+      return j.rates?.TRY || null;
     }
-  }catch(e){}
-  try{
-    // Gold price in USD per troy oz → convert to per gram (/31.1035)
-    const gold = await fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/xau.json');
-    if(gold.ok){
-      const gj = await gold.json();
-      const xauUSD = gj.xau?.usd || null; // USD per 1 XAU (troy oz)
-      assetRates.goldUSD = xauUSD ? xauUSD / 31.1035 : null; // per gram
+  ];
+
+  for(const api of usdApis){
+    try{
+      const rate = await api();
+      if(rate){ assetRates.usdtry = rate; break; }
+    }catch(e){}
+  }
+
+  // Gold — USD per gram (troy oz = 31.1035g)
+  const goldApis = [
+    async () => {
+      const r = await fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/xau.json');
+      const j = await r.json();
+      const xauUsd = j.xau?.usd || null;
+      return xauUsd ? xauUsd / 31.1035 : null;
+    },
+    async () => {
+      const r = await fetch('https://latest.currency-api.pages.dev/v1/currencies/xau.json');
+      const j = await r.json();
+      const xauUsd = j.xau?.usd || null;
+      return xauUsd ? xauUsd / 31.1035 : null;
     }
-  }catch(e){}
+  ];
+
+  for(const api of goldApis){
+    try{
+      const rate = await api();
+      if(rate){ assetRates.goldUSD = rate; break; }
+    }catch(e){}
+  }
+
   assetRates.updatedAt = new Date().toLocaleTimeString('tr-TR');
   saveAssetRatesCache();
   renderAssetRatesBar();
