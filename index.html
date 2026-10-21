@@ -12,11 +12,8 @@
 <link rel="manifest" href="manifest.json"/>
 <link rel="apple-touch-icon" href="icons/icon-192x192.png"/>
 <title>Bütçe Uygulaması</title>
-<meta name="apple-mobile-web-app-capable" content="yes"/>
-<meta name="apple-mobile-web-app-status-bar-style" content="default"/>
-<meta name="apple-mobile-web-app-title" content="Bütçe"/>
-<link rel="apple-touch-icon" href="icon-192.svg"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
 // Unregister any existing service workers to fix cache issues
 if('serviceWorker' in navigator){
   navigator.serviceWorker.getRegistrations().then(regs => {
@@ -115,6 +112,7 @@ if('serviceWorker' in navigator){
   .pie-legend-left{display:flex;align-items:center;gap:6px}
   .pie-legend-dot{width:8px;height:8px;border-radius:2px;flex-shrink:0}
   .pie-legend-pct{font-size:11px;color:#aaa}
+  .pie-total-bar{display:flex;align-items:center;justify-content:space-between;padding-top:6px;margin-top:4px;border-top:0.5px solid #ddd}
   .chart-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:12px}
   .page{display:none}.page.active{display:block}
   .section-divider{font-size:12px;font-weight:500;color:#aaa;padding:8px 0 4px;text-transform:uppercase;letter-spacing:.04em;border-top:0.5px solid #eee;margin-top:4px}
@@ -154,6 +152,7 @@ if('serviceWorker' in navigator){
   <div class="sync-bar">
     <div class="sync-dot loading" id="sync-dot"></div>
     <span id="sync-text">Bağlanıyor...</span>
+    <button class="btn-icon" onclick="changeToken()" title="Senkronizasyon anahtarı">🔑</button>
   </div>
   <div class="tabs">
     <button class="tab" onclick="showPage('assets',this)">Assets</button>
@@ -175,7 +174,7 @@ if('serviceWorker' in navigator){
       <div class="entry-list" id="upcoming-list"></div>
     </div>
     <div class="section">
-      <div class="section-title">Aylık görünüm</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem"><div class="section-title" style="margin-bottom:0">Aylık görünüm</div><div style="display:flex;align-items:center;gap:8px"><button class="btn-nav" onclick="changeBarYear(-1)">‹</button><span id="bar-year-label" style="font-size:13px;font-weight:500;color:#1a1a1a;min-width:48px;text-align:center"></span><button class="btn-nav" onclick="changeBarYear(1)">›</button></div></div>
       <div class="chart-wrap"><canvas id="barChart"></canvas></div>
     </div>
     <div class="section">
@@ -238,6 +237,24 @@ if('serviceWorker' in navigator){
         <button class="btn-add" onclick="saveAssets()">Kaydet</button>
         <span style="font-size:12px;color:#aaa">Değerleri girip kaydet — anlık snapshot otomatik alınır</span>
       </div>
+    </div>
+
+    <!-- Investment accounts -->
+    <div class="section">
+      <div class="section-title">Yatırım hesapları</div>
+      <div class="entry-list" id="invest-list"></div>
+      <div style="position:relative;height:200px;margin-top:1rem"><canvas id="investLineChart"></canvas></div>
+      <div class="section-divider" style="margin-top:12px">Para yatırma / çekme</div>
+      <div class="form-grid" style="margin-top:8px">
+        <div><div class="field-label">Hesap</div><select id="if-account"></select></div>
+        <div><div class="field-label">Tarih</div><input id="if-date" type="date"/></div>
+      </div>
+      <div class="form-grid">
+        <div><div class="field-label">Tutar ($) — yatırma +, çekme −</div><input id="if-amount" type="number" step="any" placeholder="örn: 1000 veya -500"/></div>
+        <div style="display:flex;align-items:flex-end"><button class="btn-add" onclick="addInvestFlow()">+ Ekle</button></div>
+      </div>
+      <div class="entry-list" id="invest-flow-list"></div>
+      <div style="font-size:12px;color:#aaa;margin-top:8px">Getiri, aylık kayıtlara göre ve yatırdığın/çektiğin para düşülerek yaklaşık hesaplanır.</div>
     </div>
 
     <!-- Monthly chart -->
@@ -309,8 +326,8 @@ if('serviceWorker' in navigator){
         <div><div class="field-label">Kategori</div><select id="inc-category"></select></div>
         <div><div class="field-label">Gelir günü</div><select id="inc-day"></select></div>
       </div>
-      <div class="checkbox-row" onclick="toggleRecurring('inc')">
-        <input type="checkbox" id="inc-recurring"/>
+      <div class="checkbox-row" onclick="if(event.target===this)toggleRecurring('inc')">
+        <input type="checkbox" id="inc-recurring" onchange="syncRecurring('inc')"/>
         <label for="inc-recurring">Bu gelir her ay tekrarlansın</label>
       </div>
       <div class="recurring-options" id="inc-recurring-options">
@@ -358,8 +375,8 @@ if('serviceWorker' in navigator){
         <div><div class="field-label">Kategori</div><select id="exp-category"></select></div>
         <div><div class="field-label">Ödeme günü</div><select id="exp-day"></select></div>
       </div>
-      <div class="checkbox-row" onclick="toggleRecurring('exp')">
-        <input type="checkbox" id="exp-recurring"/>
+      <div class="checkbox-row" onclick="if(event.target===this)toggleRecurring('exp')">
+        <input type="checkbox" id="exp-recurring" onchange="syncRecurring('exp')"/>
         <label for="exp-recurring">Bu gider her ay tekrarlansın</label>
       </div>
       <div class="recurring-options" id="exp-recurring-options">
@@ -398,7 +415,19 @@ if('serviceWorker' in navigator){
 
 <script>
 const APPS_SCRIPT_URL='https://script.google.com/macros/s/AKfycbwvjlauyYEF9ezPRnVRwuF8vott55Le86df2QyXn_hIvJh-ajUqRe6SgUCr6UXREhgG/exec';
-const SECRET='butce_gizli_anahtar_2024_estiarte';
+// The sync key is never stored in the code: it is asked once and kept only on this device
+const TOKEN_KEY='butce_token';
+function getToken(){try{return localStorage.getItem(TOKEN_KEY)||'';}catch(e){return '';}}
+function askToken(){
+  const t=prompt('Senkronizasyon anahtarını gir (Apps Script\'teki anahtar):', '');
+  if(t&&t.trim()){localStorage.setItem(TOKEN_KEY,t.trim());return true;}
+  return false;
+}
+function changeToken(){
+  if(!askToken())return;
+  // Re-read with the new key; local unsynced changes are kept and pushed
+  loadPromise=syncFromRemote(false);
+}
 
 // ── Categories ────────────────────────────────────────────────────
 const INC_CATEGORIES=[
@@ -427,6 +456,22 @@ const EXP_CATEGORIES=[
   {id:'diger_gider',label:'Diğer',          color:'#F9CDB8'},
 ];
 
+// Escape user text before putting it into HTML
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+// Amount of an entry in a given month. Recurring entries keep an amountHistory
+// ([{from: year*12+month, amount}], sorted) so changing the amount doesn't rewrite the past.
+function amountFor(e,y,m){
+  if(!e.recurring||!e.amountHistory||!e.amountHistory.length)return e.amount;
+  const idx=y*12+m;let a=e.amount;
+  for(const h of e.amountHistory)if(h.from<=idx)a=h.amount;
+  return a;
+}
+function sumFor(items,y,m){return items.reduce((s,e)=>s+amountFor(e,y,m),0);}
+
+// Payment day clamped to the month's length (day 31 → 30 in April, 28/29 in February)
+function effDay(payDay,y,m){return Math.min(payDay||1,new Date(y,m+1,0).getDate());}
+
 function getCatColor(type, catId){
   const list = type==='income' ? INC_CATEGORIES : EXP_CATEGORIES;
   return list.find(c=>c.id===catId)?.color || '#aaa';
@@ -436,7 +481,7 @@ function getCatLabel(type, catId){
   return list.find(c=>c.id===catId)?.label || catId || '—';
 }
 
-let data={income:[],expenses:[],earlyPayments:[],manualEntries:[],assetValues:{},assetSnapshots:{}};
+let data={income:[],expenses:[],earlyPayments:[],manualEntries:[],assetValues:{},assetSnapshots:{},investFlows:[],rev:null};
 let barChart=null, incPie=null, expPie=null;
 let openEditId=null, saveTimer=null;
 const MAX_UNDO=20; let undoStack=[];
@@ -490,31 +535,98 @@ const EXP_PALETTE=['#D85A30','#E8794F','#F0997B','#F5B99A','#F9CDB8','#993C1D','
 function setSync(s,m){document.getElementById('sync-dot').className='sync-dot '+s;document.getElementById('sync-text').textContent=m;}
 function renderTodayDate(){document.getElementById('today-date').textContent=new Date().toLocaleDateString('tr-TR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});}
 
-async function remoteRead(){const res=await fetch(APPS_SCRIPT_URL+'?token='+encodeURIComponent(SECRET),{redirect:'follow'});if(!res.ok)throw new Error('HTTP '+res.status);const text=await res.text();if(!text||text==='{}')return null;return JSON.parse(text);}
-async function remoteWrite(d){await fetch(APPS_SCRIPT_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'token='+encodeURIComponent(SECRET)+'&contents='+encodeURIComponent(JSON.stringify(d))});}
+async function remoteRead(){const token=getToken();if(!token)throw new Error('no token');const res=await fetch(APPS_SCRIPT_URL+'?token='+encodeURIComponent(token),{redirect:'follow',cache:'no-store'});if(!res.ok)throw new Error('HTTP '+res.status);const text=await res.text();if(!text||text==='{}')return null;return JSON.parse(text);}
+async function remoteWrite(d){await fetch(APPS_SCRIPT_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'token='+encodeURIComponent(getToken())+'&contents='+encodeURIComponent(JSON.stringify(d))});}
+
+// Sync state, persisted so it survives reloads:
+//  butce_base_rev — revision of the remote data the local copy is based on
+//  butce_unsynced — '1' while local changes have not been confirmed on the remote
+let editSeq=0, lastRemoteRev=null, loadPromise=Promise.resolve(), saveQueue=Promise.resolve(), saving=false;
+function setBaseRev(rev){lastRemoteRev=rev||null;try{if(rev)localStorage.setItem('butce_base_rev',rev);else localStorage.removeItem('butce_base_rev');}catch(e){}}
+function isUnsynced(){try{return localStorage.getItem('butce_unsynced')==='1';}catch(e){return false;}}
+function setUnsynced(v){try{if(v)localStorage.setItem('butce_unsynced','1');else localStorage.removeItem('butce_unsynced');}catch(e){}}
+function cacheLocal(){try{localStorage.setItem('butce_cache',JSON.stringify(data));}catch(e){}}
+
+function applyData(d){
+  data.income=(d.income||[]).map(migrateEntry);data.expenses=(d.expenses||[]).map(migrateEntry);
+  data.earlyPayments=d.earlyPayments||[];data.manualEntries=d.manualEntries||[];
+  data.assetValues=d.assetValues||{};data.assetSnapshots=d.assetSnapshots||{};
+  data.investFlows=d.investFlows||[];data.rev=d.rev||null;
+}
 
 async function load(){
   setSync('loading','Veriler yükleniyor...');renderTodayDate();loadFxCache();loadAssetRatesCache();
   const cache=localStorage.getItem('butce_cache');
-  if(cache){try{const d=JSON.parse(cache);data.income=(d.income||[]).map(migrateEntry);data.expenses=(d.expenses||[]).map(migrateEntry);data.earlyPayments=d.earlyPayments||[];data.manualEntries=d.manualEntries||[];data.assetValues=d.assetValues||{};data.assetSnapshots=d.assetSnapshots||{};}catch(e){}}
+  if(cache){try{applyData(JSON.parse(cache));}catch(e){}}
+  try{lastRemoteRev=localStorage.getItem('butce_base_rev')||null;}catch(e){}
   initSelects();
   document.getElementById('loading-overlay').style.display='none';
   try{ render(); }catch(e){ console.error('render error:',e); }
+  if(!getToken()&&!askToken()){setSync('err','Anahtar girilmedi — sadece bu cihaza kaydediliyor (🔑)');return;}
+  loadPromise=syncFromRemote(false);
+}
+
+// Reads the remote data. Local changes that are not synced yet (made offline, or while
+// the remote was still loading) are never overwritten: they are pushed with a conflict check.
+async function syncFromRemote(quiet){
   try{
     const remote=await remoteRead();
+    if(isUnsynced()){queueRemoteSave();return;}
+    const rRev=remote?.rev||null;
     if(remote&&remote.income){
-      data.income=(remote.income||[]).map(migrateEntry);data.expenses=(remote.expenses||[]).map(migrateEntry);data.earlyPayments=remote.earlyPayments||[];data.manualEntries=remote.manualEntries||[];data.assetValues=remote.assetValues||{};data.assetSnapshots=remote.assetSnapshots||{};
-      localStorage.setItem('butce_cache',JSON.stringify(data));render();setSync('ok','Senkronize · '+new Date().toLocaleTimeString('tr-TR'));fetchAssetRates();
-    }else if(!cache)setSync('ok','Yeni bütçe oluşturuldu');
-    else setSync('ok','Yerel önbellekten yüklendi');
-  }catch(e){setSync('err','Çevrimdışı mod');}
+      if(quiet&&rRev&&rRev===lastRemoteRev)return;
+      applyData(remote);setBaseRev(rRev);cacheLocal();render();
+      setSync('ok','Senkronize · '+new Date().toLocaleTimeString('tr-TR'));
+      if(!quiet)fetchAssetRates();
+    }else if(!quiet)setSync('ok',localStorage.getItem('butce_cache')?'Yerel önbellekten yüklendi':'Yeni bütçe oluşturuldu');
+  }catch(e){if(!quiet)setSync('err',getToken()?'Çevrimdışı mod — anahtar yanlış olabilir (🔑)':'Anahtar yok (🔑)');}
 }
 
 function saveNow(){
-  localStorage.setItem('butce_cache',JSON.stringify(data));setSync('loading','Kaydediliyor...');
+  editSeq++;cacheLocal();setUnsynced(true);setSync('loading','Kaydediliyor...');
   clearTimeout(saveTimer);
-  saveTimer=setTimeout(async()=>{try{await remoteWrite(data);setSync('ok','Kaydedildi · '+new Date().toLocaleTimeString('tr-TR'));}catch(e){setSync('err','Sheets\'e yazılamadı — yerel kaydedildi');}},800);
+  saveTimer=setTimeout(queueRemoteSave,800);
 }
+function queueRemoteSave(){saveQueue=saveQueue.then(()=>loadPromise).then(doRemoteSave).catch(()=>{});}
+
+async function doRemoteSave(){
+  if(!isUnsynced())return;
+  if(!getToken()){setSync('err','Anahtar yok — sadece bu cihaza kaydedildi (🔑)');return;}
+  saving=true;
+  try{
+    // 1) Conflict check: has another device saved since our copy was loaded?
+    const remote=await remoteRead();
+    const rRev=remote?.rev||null;
+    if(rRev&&rRev!==lastRemoteRev){
+      const useRemote=confirm('Veriler başka bir cihazda değiştirilmiş.\n\nTamam: diğer cihazdaki verileri yükle (bu cihazdaki kaydedilmemiş değişiklikler kaybolur).\nİptal: bu cihazdaki verilerle üzerine yaz.');
+      if(useRemote){
+        applyData(remote);setBaseRev(rRev);setUnsynced(false);cacheLocal();render();
+        setSync('ok','Diğer cihazdaki veriler yüklendi');return;
+      }
+    }
+    // 2) Write with a fresh revision
+    data.rev=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);
+    const sentRev=data.rev, sentSeq=editSeq;cacheLocal();
+    await remoteWrite(data);
+    // 3) The write response is unreadable (no-cors), so verify by reading it back
+    let ok=false;
+    for(let i=0;i<2&&!ok;i++){
+      if(i)await new Promise(r=>setTimeout(r,1500));
+      const check=await remoteRead();ok=check?.rev===sentRev;
+    }
+    if(ok){
+      setBaseRev(sentRev);
+      if(editSeq===sentSeq)setUnsynced(false); // newer edits stay queued
+      setSync('ok','Kaydedildi · '+new Date().toLocaleTimeString('tr-TR'));
+    }else setSync('err','Sheets\'e yazılamadı — yerel kaydedildi (anahtarı kontrol et 🔑)');
+  }catch(e){setSync('err','Sheets\'e yazılamadı — yerel kaydedildi');}
+  finally{saving=false;}
+}
+
+// Pick up changes made on another device when the app comes back to the foreground
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'&&getToken()&&!saving&&!isUnsynced())syncFromRemote(true);
+});
 
 function migrateEntry(e){
   if(e.freq!==undefined)return{id:e.id,name:e.name,amount:e.amount,payDay:e.payDay||1,recurring:true,startMonth:0,startYear:new Date().getFullYear(),duration:'forever',month:null,year:null,category:null};
@@ -538,7 +650,7 @@ function isIncomeReceived(e, y, m){
   if(entryIdx < curIdx) return true;   // past month — always received
   if(entryIdx > curIdx) return false;  // future month — not received yet
   // current month: received if payDay <= today
-  return (e.payDay || 1) <= curD;
+  return effDay(e.payDay, y, m) <= curD;
 }
 
 // Returns true if a recurring expense payment is considered "paid" for month y/m
@@ -555,7 +667,7 @@ function isExpensePaid(e, y, m){
   if(entryIdx > curIdx) return false;           // future month — not paid yet
   // current month: paid if payDay <= today OR early paid
   if(isEarlyPaid(e.id, y, m)) return true;
-  return (e.payDay || 1) <= curD;
+  return effDay(e.payDay, y, m) <= curD;
 }
 function markEarlyPaid(entryId){
   const now=new Date();const year=now.getFullYear();const month=now.getMonth();const day=now.getDate();
@@ -565,7 +677,7 @@ function markEarlyPaid(entryId){
   const entry=data.expenses.find(e=>e.id===entryId);
   if(entry){
     // Add one-time entry for this month, recurring original is hidden via isHiddenByEarlyPay
-    data.expenses.push({id:Date.now(),name:entry.name+' (erken ödeme)',amount:entry.amount,
+    data.expenses.push({id:Date.now(),name:entry.name+' (erken ödeme)',amount:amountFor(entry,year,month),
       payDay:day,recurring:false,startMonth:month,startYear:year,
       duration:'forever',month,year,earlyPayRef:entryId,category:entry.category||null});
   }
@@ -596,12 +708,14 @@ function initSelects(){
   buildMonthYearSelects('exp-start-month','exp-start-year');
   buildCategorySelect('inc-category', INC_CATEGORIES, INC_CATEGORIES[0].id);
   buildCategorySelect('exp-category', EXP_CATEGORIES, EXP_CATEGORIES[0].id);
+  initInvestForm();
 }
 
-function toggleRecurring(p){const cb=document.getElementById(p+'-recurring');cb.checked=!cb.checked;document.getElementById(p+'-recurring-options').classList.toggle('open',cb.checked);}
+function toggleRecurring(p){const cb=document.getElementById(p+'-recurring');cb.checked=!cb.checked;syncRecurring(p);}
+function syncRecurring(p){document.getElementById(p+'-recurring-options').classList.toggle('open',document.getElementById(p+'-recurring').checked);}
 function toggleCustomDuration(p){document.getElementById(p+'-custom-months-wrap').style.display=document.getElementById(p+'-duration').value==='custom'?'flex':'none';}
 function fmt(n){return '₺'+Math.round(n).toLocaleString('tr-TR');}
-function daysUntil(payDay){const t=new Date();const y=t.getFullYear();const m=t.getMonth();const d=t.getDate();let dt=new Date(y,m,payDay);if(payDay<d)dt=new Date(y,m+1,payDay);return Math.round((dt-t)/86400000);}
+function daysUntil(payDay){const t=new Date();const y=t.getFullYear();const m=t.getMonth();const d=t.getDate();const today=new Date(y,m,d);let dt=new Date(y,m,effDay(payDay,y,m));if(dt<today)dt=new Date(y,m+1,effDay(payDay,y,m+1));return Math.round((dt-today)/86400000);}
 function isActiveInMonth(e,y,m){if(!e.recurring)return e.year===y&&e.month===m;const sy=e.startYear??y;const sm=e.startMonth??0;const si=sy*12+sm;const ci=y*12+m;if(ci<si)return false;if(e.duration==='forever'||!e.duration)return true;return ci<si+parseInt(e.duration);}
 function remainingMonths(e){if(!e.recurring||e.duration==='forever'||!e.duration)return null;const now=new Date();const ci=now.getFullYear()*12+now.getMonth();const sy=e.startYear??now.getFullYear();const sm=e.startMonth??0;const rem=parseInt(e.duration)-(ci-(sy*12+sm));return rem>0?rem:0;}
 function getDuration(p){const v=document.getElementById(p+'-duration').value;if(v==='custom'){const cm=parseInt(document.getElementById(p+'-custom-months').value);return isNaN(cm)||cm<1?'forever':String(cm);}return v;}
@@ -646,8 +760,23 @@ function saveEdit(type,id){
   if(!name||isNaN(amount)||amount<=0)return;
   let duration='forever',startMonth=arr[idx].startMonth??0,startYear=arr[idx].startYear??new Date().getFullYear();
   if(recurring){const smEl=document.getElementById('edit-start-month-'+id);const syEl=document.getElementById('edit-start-year-'+id);if(smEl)startMonth=parseInt(smEl.value);if(syEl)startYear=parseInt(syEl.value);const dv=document.getElementById('edit-duration-'+id).value;if(dv==='custom'){const cm=parseInt(document.getElementById('edit-custom-months-'+id).value);duration=isNaN(cm)||cm<1?'forever':String(cm);}else duration=dv;}
+  const old=arr[idx];
+  const p=type==='income'?'inc':'exp';
+  const vY=view[p].year, vM=view[p].month, viewIdx=vY*12+vM;
+  // Monthly entry turned into one-time: place it in the month being viewed
+  const month=recurring?null:(old.recurring?vM:old.month);
+  const year=recurring?null:(old.recurring?vY:old.year);
+  let baseAmount=amount, amountHistory=[];
+  if(recurring&&old.recurring){
+    baseAmount=old.amount;amountHistory=(old.amountHistory||[]).slice();
+    if(amount!==amountFor(old,vY,vM)){
+      const scope=document.getElementById('edit-scope-'+id)?.value||'from';
+      if(scope==='all'||viewIdx<=startYear*12+startMonth){baseAmount=amount;amountHistory=[];}
+      else{amountHistory=amountHistory.filter(h=>h.from<viewIdx);amountHistory.push({from:viewIdx,amount});}
+    }
+  }
   pushUndo();
-  arr[idx]={...arr[idx],name,amount,payDay,category,recurring,duration,startMonth,startYear,month:recurring?null:arr[idx].month,year:recurring?null:arr[idx].year};
+  arr[idx]={...old,name,amount:baseAmount,amountHistory,payDay,category,recurring,duration,startMonth,startYear,month,year};
   openEditId=null;saveNow();if(type==='income')renderIncomeList();else renderExpenseList();renderSummary();renderCharts();renderUpcoming();renderWealth();
 }
 
@@ -672,13 +801,16 @@ function buildRecurringEditBlock(e){
 
 function entryEditForm(e,type){
   const isOpen=openEditId===e.id;
+  const p=type==='income'?'inc':'exp';const vY=view[p].year;const vM=view[p].month;
+  const scopeHtml=e.recurring?`<div style="margin-bottom:8px"><div class="field-label">Tutar değişikliği</div><select id="edit-scope-${e.id}" style="height:34px;padding:0 10px;font-size:13px;border:0.5px solid #ccc;border-radius:8px;background:#fff;color:#1a1a1a;width:100%"><option value="from">${TR_MONTHS[vM]} ${vY} ve sonrası için geçerli</option><option value="all">Tüm aylar (geçmiş dahil)</option></select></div>`:'';
   const cats=type==='income'?INC_CATEGORIES:EXP_CATEGORIES;
   const dayLabel=type==='income'?'Gelir günü':'Ödeme günü';
   return `<div id="edit-form-${e.id}" class="edit-form${isOpen?' open':''}">
     <div class="edit-grid">
-      <div><div class="field-label">Ad</div><input id="edit-name-${e.id}" type="text" value="${e.name}"/></div>
-      <div><div class="field-label">Tutar (₺)</div><input id="edit-amount-${e.id}" type="number" value="${e.amount}" min="0"/></div>
+      <div><div class="field-label">Ad</div><input id="edit-name-${e.id}" type="text" value="${esc(e.name)}"/></div>
+      <div><div class="field-label">Tutar (₺)</div><input id="edit-amount-${e.id}" type="number" value="${amountFor(e,vY,vM)}" min="0" step="any"/></div>
     </div>
+    ${scopeHtml}
     <div class="edit-grid">
       <div><div class="field-label">Kategori</div>${buildCatSelectHtml('edit-cat-'+e.id, cats, e.category)}</div>
       <div><div class="field-label">${dayLabel}</div>${buildDaySelect('edit-day-'+e.id,e.payDay||1)}</div>
@@ -714,12 +846,12 @@ function entryRowHtml(e,type){
     <div class="entry-main">
       <div>
         <span class="entry-name" style="${hasEnded?'color:#aaa':''}">
-          <span class="cat-dot" style="background:${catColor}"></span>${e.name}
+          <span class="cat-dot" style="background:${catColor}"></span>${esc(e.name)}
         </span>${dueBadge}
         <div class="entry-meta">${catLabel}${dayLabel?` · ${dayLabel}`:''}${startLabel}</div>
       </div>
       <span class="badge ${badgeClass}">${badgeText}</span>
-      <div class="entry-amount${hasEnded?' ended':''}">${fmt(e.amount)}</div>
+      <div class="entry-amount${hasEnded?' ended':''}">${fmt(amountFor(e,vY,vM))}</div>
       <button class="btn-icon" onclick="toggleEdit('${type}',${e.id})" title="Düzenle">✎</button>
       <button class="btn-icon del" onclick="deleteEntry('${type}',${e.id})" title="Sil">×</button>
     </div>
@@ -738,7 +870,7 @@ function renderList(type){
   // isEntryActive only affects badge display, not inclusion in list
   const active=items.filter(e=>isEntryActive(e)||vY*12+vM<new Date().getFullYear()*12+new Date().getMonth());
   const ended=items.filter(e=>!isEntryActive(e)&&vY*12+vM>=new Date().getFullYear()*12+new Date().getMonth());
-  const total=active.reduce((s,e)=>s+e.amount,0);
+  const total=sumFor(active,vY,vM);
   document.getElementById(p+'-month-total').textContent=items.length?`Toplam: ${fmt(total)}`:'';
   if(!items.length){listEl.innerHTML=`<div class="empty">Bu ay ${type==='income'?'gelir':'gider'} yok</div>`;return;}
   const recurring=active.filter(e=>e.recurring).sort((a,b)=>(a.payDay||0)-(b.payDay||0));
@@ -758,17 +890,18 @@ function renderUpcoming(){
   const all=[
     ...data.income.filter(e=>e.recurring&&e.payDay&&isActiveInMonth(e,curY,curM)&&(remainingMonths(e)??1)>0).map(e=>({...e,kind:'income'})),
     ...data.expenses.filter(e=>e.recurring&&e.payDay&&isActiveInMonth(e,curY,curM)&&(remainingMonths(e)??1)>0&&!isHiddenByEarlyPay(e,curY,curM)).map(e=>({...e,kind:'expense'}))
-  ].sort((a,b)=>a.payDay-b.payDay);
+  ].sort((a,b)=>effDay(a.payDay,curY,curM)-effDay(b.payDay,curY,curM));
   if(!all.length){el.innerHTML='<div class="empty">Bu ay tekrarlanan ödeme yok</div>';return;}
   el.innerHTML=all.map(e=>{
     const isInc=e.kind==='income';const color=isInc?'#1D9E75':'#D85A30';
     const paid=isEarlyPaid(e.id,curY,curM);
-    const isPast=e.payDay<curD;const isToday=e.payDay===curD;
+    const day=effDay(e.payDay,curY,curM);
+    const isPast=day<curD;const isToday=day===curD;
     let badge='';
     if(paid) badge='<span class="badge badge-paid">Ödendi</span>';
     else if(isToday) badge='<span class="badge badge-today">Bugün</span>';
     else if(isPast) badge='<span class="badge" style="background:#ebebeb;color:#aaa">Geçti</span>';
-    else { const dLeft=e.payDay-curD; badge=dLeft===1?'<span class="badge badge-due">Yarın</span>':`<span class="badge badge-due">${dLeft} gün sonra</span>`; }
+    else { const dLeft=day-curD; badge=dLeft===1?'<span class="badge badge-due">Yarın</span>':`<span class="badge badge-due">${dLeft} gün sonra</span>`; }
     const rem=remainingMonths(e);const remText=rem!=null&&e.duration!=='forever'?` · ${rem} ay kaldı`:'';
     const payBtn=(!isInc&&!paid&&!isPast)?`<button class="btn-pay" onclick="markEarlyPaid(${e.id})">Bugün ödedim</button>`:(paid?`<span style="font-size:11px;color:#aaa">✓ ödendi</span>`:'<div></div>');
     const catColor=e.category?getCatColor(e.kind==='income'?'income':'expense',e.category):'#ddd';
@@ -776,11 +909,11 @@ function renderUpcoming(){
       <div class="upcoming-main">
         <div>
           <span class="entry-name" style="${paid||isPast?'color:#aaa;':''} ${paid?'text-decoration:line-through':''}">
-            <span class="cat-dot" style="background:${catColor}"></span>${e.name}
+            <span class="cat-dot" style="background:${catColor}"></span>${esc(e.name)}
           </span>${badge}
           <div class="entry-meta">Her ayın ${e.payDay}. günü · ${isInc?'Gelir':'Gider'}${remText}</div>
         </div>
-        <div class="entry-amount" style="color:${paid||isPast?'#aaa':color}">${isInc?'+':'−'}${fmt(e.amount)}</div>
+        <div class="entry-amount" style="color:${paid||isPast?'#aaa':color}">${isInc?'+':'−'}${fmt(amountFor(e,curY,curM))}</div>
         ${payBtn}<div></div>
       </div>
     </div>`;
@@ -791,23 +924,29 @@ function renderSummary(){
   const now=new Date();const y=now.getFullYear();const m=now.getMonth();
   const aI=data.income.filter(e=>isActiveInMonth(e,y,m)&&isIncomeReceived(e,y,m));
   const aE=data.expenses.filter(e=>isActiveInMonth(e,y,m)&&!isHiddenByEarlyPay(e,y,m)&&isExpensePaid(e,y,m));
-  const incM=aI.reduce((s,e)=>s+e.amount,0);const expM=aE.reduce((s,e)=>s+e.amount,0);const balM=incM-expM;
+  const incM=sumFor(aI,y,m);const expM=sumFor(aE,y,m);const balM=incM-expM;
   document.getElementById('sum-income').textContent=fmt(incM);
   document.getElementById('sum-expense').textContent=fmt(expM);
   const b=document.getElementById('sum-balance');b.textContent=fmt(balM);b.className='metric-value '+(balM>=0?'pos':'neg');
 }
 
+let barYear=new Date().getFullYear();
+function changeBarYear(dir){
+  const maxY=new Date().getFullYear()+1;
+  barYear=Math.min(maxY,barYear+dir);renderBarChart();
+}
 function renderBarChart(){
-  const curY=new Date().getFullYear();const curM=new Date().getMonth();
+  const nowY=new Date().getFullYear();const curY=barYear;const curM=curY===nowY?new Date().getMonth():-1;
+  const yl=document.getElementById('bar-year-label');if(yl)yl.textContent=curY;
 
   // Single bar per month — total income and total expense
   const incData=TR_SHORT.map((_,m)=>{
     const items=data.income.filter(e=>isActiveInMonth(e,curY,m)&&isIncomeReceived(e,curY,m));
-    return Math.round(items.reduce((s,e)=>s+e.amount,0));
+    return Math.round(sumFor(items,curY,m));
   });
   const expData=TR_SHORT.map((_,m)=>{
     const items=data.expenses.filter(e=>isActiveInMonth(e,curY,m)&&!isHiddenByEarlyPay(e,curY,m)&&isExpensePaid(e,curY,m));
-    return Math.round(items.reduce((s,e)=>s+e.amount,0));
+    return Math.round(sumFor(items,curY,m));
   });
 
   if(barChart)barChart.destroy();
@@ -855,8 +994,8 @@ function renderPieCharts(){
     const y=pieView.year;const m=pieView.month;
     const isCur=y===curY&&m===curM;
     if(mlabel) mlabel.textContent=TR_MONTHS[m]+' '+y+(isCur?' (Bu ay)':'');
-    incItems=data.income.filter(e=>isActiveInMonth(e,y,m)&&isIncomeReceived(e,y,m));
-    expItems=data.expenses.filter(e=>isActiveInMonth(e,y,m)&&!isHiddenByEarlyPay(e,y,m)&&isExpensePaid(e,y,m));
+    incItems=data.income.filter(e=>isActiveInMonth(e,y,m)&&isIncomeReceived(e,y,m)).map(e=>({...e,amount:amountFor(e,y,m)}));
+    expItems=data.expenses.filter(e=>isActiveInMonth(e,y,m)&&!isHiddenByEarlyPay(e,y,m)&&isExpensePaid(e,y,m)).map(e=>({...e,amount:amountFor(e,y,m)}));
   }
 
   function buildAllTimeItems(items, type){
@@ -874,8 +1013,9 @@ function renderPieCharts(){
       const dur=e.duration==='forever'||!e.duration?null:parseInt(e.duration);
       // endIdx: either duration end or current month, whichever is earlier
       const endIdx=dur?Math.min(startIdx+dur-1,curIdx):curIdx;
-      const months=endIdx-startIdx+1;
-      return {...e, amount: e.amount * Math.max(0,months)};
+      let total=0;
+      for(let idx=startIdx;idx<=endIdx;idx++)total+=amountFor(e,Math.floor(idx/12),idx%12);
+      return {...e, amount: total};
     }).filter(Boolean);
   }
 
@@ -947,8 +1087,8 @@ function showPage(name,el){
 function getMonthNet(y, m){
   const incItems = data.income.filter(e => isActiveInMonth(e,y,m) && isIncomeReceived(e,y,m));
   const expItems = data.expenses.filter(e => isActiveInMonth(e,y,m) && !isHiddenByEarlyPay(e,y,m) && isExpensePaid(e,y,m));
-  const inc = incItems.reduce((s,e) => s+e.amount, 0);
-  const exp = expItems.reduce((s,e) => s+e.amount, 0);
+  const inc = sumFor(incItems, y, m);
+  const exp = sumFor(expItems, y, m);
   return inc - exp;
 }
 
@@ -1049,15 +1189,15 @@ function renderWealth(){
     // cumUSD[i] = sum of usdNet for months[0..i]
     let usdCumMap = {};
     if(rateMap){
-      let runningUSD = 0;
+      let runningUSD = 0, missing = false;
       // rows is oldest→newest, rowsDesc is newest→oldest
       // iterate rows (oldest first) to accumulate
       rows.forEach(r => {
         const rateKey = `${r.y}-${r.m}`;
         const rate = rateMap[rateKey];
-        const usdNet = rate ? r.net / rate : 0;
-        runningUSD += usdNet;
-        usdCumMap[rateKey] = runningUSD;
+        // A month without a rate makes every later cumulative value unknown
+        if(rate) runningUSD += r.net / rate; else if(r.net !== 0) missing = true;
+        usdCumMap[rateKey] = missing ? 'missing' : runningUSD;
       });
     }
 
@@ -1075,7 +1215,9 @@ function renderWealth(){
 
       // Birikimli USD — her ayın kendi kuruyla hesaplanan USD değerlerinin toplamı
       const usdCumVal = rateMap ? usdCumMap[rateKey] : null;
-      const usdCumStr = usdCumVal !== null
+      const usdCumStr = usdCumVal === 'missing'
+        ? ` · <span style="color:#aaa" title="Bazı ayların kuru alınamadı">$— (eksik kur)</span>`
+        : usdCumVal !== null && usdCumVal !== undefined
         ? ` · <span style="color:#2980b9;font-weight:500">${usdCumVal>=0?'':'-'}$${Math.round(Math.abs(usdCumVal)).toLocaleString('tr-TR')}</span>`
         : (loading ? ` · <span style="color:#ccc">$...</span>` : '');
 
@@ -1170,7 +1312,7 @@ function renderManualList(){
     const isPos = e.amount >= 0;
     return `<div class="entry-row">
       <div class="entry-main">
-        <span class="entry-name">${e.name}</span>
+        <span class="entry-name">${esc(e.name)}</span>
         <div></div>
         <div class="entry-amount" style="color:${isPos?'#1D9E75':'#D85A30'}">${isPos?'+':''}${fmt(e.amount)}</div>
         <button class="btn-icon" onclick="toggleManualEdit(${e.id})" title="Düzenle">✎</button>
@@ -1178,7 +1320,7 @@ function renderManualList(){
       </div>
       <div id="mv-edit-form-${e.id}" class="edit-form" style="display:none">
         <div class="edit-grid">
-          <div><div class="field-label">Açıklama</div><input id="mv-edit-name-${e.id}" type="text" value="${e.name}"/></div>
+          <div><div class="field-label">Açıklama</div><input id="mv-edit-name-${e.id}" type="text" value="${esc(e.name)}"/></div>
           <div><div class="field-label">Tutar</div><input id="mv-edit-amount-${e.id}" type="number" value="${e.amount}" step="any"/></div>
         </div>
         <div class="edit-actions">
@@ -1283,15 +1425,16 @@ const ASSET_CATS = [
   {id:'tl',       label:'TL',        color:'#1D9E75', currency:'TRY', unit:'₺', placeholder:'örn: 50000'},
   {id:'usd',      label:'USD',       color:'#2980b9', currency:'USD', unit:'$', placeholder:'örn: 5000'},
   {id:'altin',    label:'Altın',     color:'#d4ac0d', currency:'GOLD',unit:'gr',placeholder:'örn: 50 (gram)'},
-  {id:'eurobond', label:'Eurobond',  color:'#8e44ad', currency:'USD', unit:'$', placeholder:'örn: 10000'},
-  {id:'ibkr',      label:'IBKR',       color:'#c0392b', currency:'USD', unit:'$', placeholder:'örn: 25000'},
-  {id:'viennalife',label:'ViennaLife', color:'#16a085', currency:'USD', unit:'$', placeholder:'örn: 10000'},
+  {id:'eurobond', label:'Eurobond',  color:'#8e44ad', currency:'USD', unit:'$', placeholder:'örn: 10000', invest:true},
+  {id:'ibkr',      label:'IBKR',       color:'#c0392b', currency:'USD', unit:'$', placeholder:'örn: 25000', invest:true},
+  {id:'viennalife',label:'ViennaLife', color:'#16a085', currency:'USD', unit:'$', placeholder:'örn: 10000', invest:true},
   {id:'borc_usd',  label:'Borç USD',   color:'#D85A30', currency:'USD', unit:'$', placeholder:'örn: 3000', debt:true},
 ];
 
 let assetRates = {usdtry: null, goldUSD: null, updatedAt: null};
 let assetLineChart = null;
 let assetPieChartObj = null;
+let assetFormDirty = false; // unsaved values typed into the asset form
 
 function loadAssetRatesCache(){
   try{
@@ -1396,9 +1539,10 @@ function getTotalUSD(){
   return ASSET_CATS.reduce((s,cat) => s + (cat.debt ? -1 : 1) * toUSD(cat.id, vals[cat.id] || 0), 0);
 }
 
-function initAssetInputs(){
+function initAssetInputs(force){
   const el = document.getElementById('asset-inputs');
   if(!el) return;
+  if(assetFormDirty && !force) return; // don't wipe what the user is typing
   const vals = getAssetData();
   el.innerHTML = ASSET_CATS.map(cat => `
     <div style="display:grid;grid-template-columns:120px 1fr;gap:8px;align-items:center">
@@ -1407,7 +1551,7 @@ function initAssetInputs(){
         <span style="font-size:14px;font-weight:500${cat.debt?';color:#D85A30':''}">${cat.label}</span>
         <span style="font-size:11px;color:#aaa">(${cat.unit})</span>
       </div>
-      <input id="ai-${cat.id}" type="number" min="0" step="any"
+      <input id="ai-${cat.id}" type="number" min="0" step="any" oninput="assetFormDirty=true"
         value="${vals[cat.id] || ''}"
         placeholder="${cat.placeholder}"
         style="height:36px;padding:0 10px;font-size:14px;border:0.5px solid #ccc;border-radius:8px;background:#fff;color:#1a1a1a;width:100%"/>
@@ -1422,11 +1566,18 @@ function saveAssets(){
     const v = parseFloat(el.value);
     data.assetValues[cat.id] = isNaN(v) ? 0 : v;
   });
+  assetFormDirty = false;
   // Auto snapshot
-  takeAssetSnapshot();
+  const snap = takeAssetSnapshot();
   saveNow();
   renderAssetSummary();
-  showToast('Assets kaydedildi');
+  showToast(snap === 'norates' ? 'Kaydedildi — kurlar yüklenemediği için snapshot alınmadı (↻ Güncelle)' : 'Assets kaydedildi');
+}
+
+// True if a TL or gold value is set but its rate isn't loaded (its USD value would count as 0)
+function assetRatesMissing(){
+  const v = getAssetData();
+  return (v.tl > 0 && !assetRates.usdtry) || (v.altin > 0 && !assetRates.goldUSD);
 }
 
 function takeAssetSnapshot(){
@@ -1434,14 +1585,18 @@ function takeAssetSnapshot(){
   const now = new Date();
   const key = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`; // month key
   const totalUSD = getTotalUSD();
-  if(totalUSD > 0){
+  if(assetRatesMissing()) return 'norates';
+  const hasAny = ASSET_CATS.some(cat => (data.assetValues||{})[cat.id]);
+  if(hasAny){
     data.assetSnapshots[key] = {
       totalUSD,
       values: {...(data.assetValues||{})},
       rates: {...assetRates},
       savedAt: now.toISOString()
     };
+    return 'ok';
   }
+  return 'empty';
 }
 
 function renderAssetSummary(){
@@ -1454,6 +1609,7 @@ function renderAssetSummary(){
 
   renderAssetPie();
   renderAssetLine();
+  renderInvestments();
   initAssetInputs();
 }
 
@@ -1532,10 +1688,7 @@ function renderAssetLine(){
     return;
   }
 
-  const labels = keys.map(k => {
-    const [y,m] = k.split('-');
-    return TR_MONTHS[parseInt(m)-1].slice(0,3)+' '+y;
-  });
+  const labels = keys.map(snapLabel);
   const values = keys.map(k => Math.round(snapshots[k].totalUSD));
 
   const old = Chart.getChart('assetLineChart'); if(old) old.destroy();
@@ -1567,6 +1720,147 @@ function renderAssetLine(){
       }
     }
   });
+}
+
+// ── Yatırım hesapları ─────────────────────────────────────────────
+// Each investment account's history comes from the monthly snapshots; deposits and
+// withdrawals (data.investFlows) are taken out so growth shows the real return.
+
+const INVEST_CATS = ASSET_CATS.filter(c => c.invest);
+
+function snapLabel(k){ const [y,m] = k.split('-'); return TR_MONTHS[parseInt(m)-1].slice(0,3)+' '+y; }
+function curSnapKey(){ const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-01`; }
+function flowMonthKey(dateStr){ return dateStr.slice(0,7)+'-01'; }
+function fmtUSDSigned(v){ return (v<0?'-':v>0?'+':'')+'$'+Math.round(Math.abs(v)).toLocaleString('tr-TR'); }
+function fmtPct(v){ return v==null||!isFinite(v) ? '' : ` (${v>=0?'+':''}${(v*100).toLocaleString('tr-TR',{maximumFractionDigits:1})}%)`; }
+
+// Net deposits for an account in months after afterKey, up to and including toKey
+function netFlows(account, afterKey, toKey){
+  return (data.investFlows||[]).filter(f => f.account===account)
+    .filter(f => { const k = flowMonthKey(f.date); return (!afterKey || k > afterKey) && k <= toKey; })
+    .reduce((s,f) => s+f.amount, 0);
+}
+
+function investStats(cat){
+  const snaps = data.assetSnapshots || {};
+  const curKey = curSnapKey();
+  const cur = (data.assetValues||{})[cat.id] || 0;
+  const past = Object.keys(snaps).sort().filter(k => k < curKey && snaps[k].values && snaps[k].values[cat.id] != null);
+  const st = {cur, prev:null, first:null};
+  if(past.length){
+    const pk = past[past.length-1], pv = snaps[pk].values[cat.id];
+    const flows = netFlows(cat.id, pk, curKey);
+    const gain = cur - pv - flows;
+    // Return relative to the money at work: starting value plus net deposits
+    st.prev = {key:pk, gain, pct: pv + flows > 0 ? gain/(pv + flows) : null};
+  }
+  const firstKey = past.find(k => snaps[k].values[cat.id] > 0);
+  if(firstKey){
+    const fv = snaps[firstKey].values[cat.id];
+    const flows = netFlows(cat.id, firstKey, curKey);
+    const gain = cur - fv - flows, base = fv + flows;
+    st.first = {key:firstKey, gain, pct: base > 0 ? gain/base : null, invested: base};
+  }
+  return st;
+}
+
+function renderInvestments(){
+  const el = document.getElementById('invest-list');
+  if(!el) return;
+  el.innerHTML = INVEST_CATS.map(cat => {
+    const st = investStats(cat);
+    const color = v => v >= 0 ? '#1D9E75' : '#D85A30';
+    const lines = [];
+    if(st.prev) lines.push(`${snapLabel(st.prev.key)} kaydına göre: <span style="color:${color(st.prev.gain)};font-weight:500">${fmtUSDSigned(st.prev.gain)}${fmtPct(st.prev.pct)}</span>`);
+    if(st.first) lines.push(`${snapLabel(st.first.key)}'dan beri: <span style="color:${color(st.first.gain)};font-weight:500">${fmtUSDSigned(st.first.gain)}${fmtPct(st.first.pct)}</span> · yatırılan $${Math.round(st.first.invested).toLocaleString('tr-TR')}`);
+    if(!lines.length) lines.push('Getiri için en az bir önceki ayın kaydı gerekli');
+    return `<div class="entry-row">
+      <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center">
+        <div>
+          <span class="entry-name"><span class="cat-dot" style="background:${cat.color}"></span>${cat.label}</span>
+          ${lines.map(l => `<div class="entry-meta">${l}</div>`).join('')}
+        </div>
+        <div class="entry-amount">$${Math.round(st.cur).toLocaleString('tr-TR')}</div>
+      </div>
+    </div>`;
+  }).join('');
+  renderInvestLine();
+  renderInvestFlows();
+}
+
+function renderInvestLine(){
+  const snaps = data.assetSnapshots || {};
+  const curKey = curSnapKey();
+  const keys = Object.keys(snaps).filter(k => k < curKey).sort();
+  keys.push(curKey);
+  const old = Chart.getChart('investLineChart'); if(old) old.destroy();
+  const ctx = document.getElementById('investLineChart')?.getContext('2d');
+  if(!ctx || keys.length < 2) return;
+  new Chart(ctx,{
+    type:'line',
+    data:{labels: keys.map(snapLabel), datasets: INVEST_CATS.map(cat => ({
+      label: cat.label,
+      data: keys.map(k => k === curKey ? ((data.assetValues||{})[cat.id] || 0) : (snaps[k].values?.[cat.id] ?? null)),
+      borderColor: cat.color, backgroundColor: cat.color, borderWidth:2, pointRadius:3, tension:0.3, spanGaps:true
+    }))},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:true,labels:{boxWidth:10,font:{size:11}}},
+        tooltip:{backgroundColor:'rgba(26,26,26,0.9)',titleColor:'#fff',bodyColor:'#fff',padding:10,cornerRadius:8,
+          callbacks:{label:ctx=>` ${ctx.dataset.label}: $${Math.round(ctx.parsed.y).toLocaleString('tr-TR')}`}
+        }
+      },
+      scales:{
+        x:{grid:{display:false},ticks:{font:{size:11},color:'#888'}},
+        y:{grid:{color:'rgba(0,0,0,0.06)'},ticks:{font:{size:11},color:'#888',callback:v=>'$'+v.toLocaleString('tr-TR')}}
+      }
+    }
+  });
+}
+
+function renderInvestFlows(){
+  const el = document.getElementById('invest-flow-list');
+  if(!el) return;
+  const flows = [...(data.investFlows||[])].sort((a,b) => b.date.localeCompare(a.date));
+  if(!flows.length){ el.innerHTML = ''; return; }
+  el.innerHTML = flows.map(f => {
+    const cat = ASSET_CATS.find(c => c.id===f.account);
+    return `<div class="entry-row">
+      <div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center">
+        <div>
+          <span class="entry-name"><span class="cat-dot" style="background:${cat?.color||'#aaa'}"></span>${esc(cat?.label||f.account)}</span>
+          <div class="entry-meta">${new Date(f.date+'T00:00:00').toLocaleDateString('tr-TR')} · ${f.amount>=0?'Yatırma':'Çekme'}</div>
+        </div>
+        <div class="entry-amount" style="color:${f.amount>=0?'#1D9E75':'#D85A30'}">${fmtUSDSigned(f.amount)}</div>
+        <button class="btn-icon del" onclick="deleteInvestFlow(${f.id})" title="Sil">×</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function initInvestForm(){
+  const sel = document.getElementById('if-account');
+  if(sel) sel.innerHTML = INVEST_CATS.map(c => `<option value="${c.id}">${c.label}</option>`).join('');
+  const d = document.getElementById('if-date');
+  if(d && !d.value){ const n = new Date(); d.value = `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`; }
+}
+
+function addInvestFlow(){
+  const account = document.getElementById('if-account').value;
+  const date = document.getElementById('if-date').value;
+  const amount = parseFloat(document.getElementById('if-amount').value);
+  if(!account || !date || isNaN(amount) || amount === 0) return;
+  pushUndo();
+  if(!data.investFlows) data.investFlows = [];
+  data.investFlows.push({id: Date.now(), account, date, amount});
+  document.getElementById('if-amount').value = '';
+  saveNow(); renderInvestments();
+  showToast(fmtUSDSigned(amount) + ' eklendi');
+}
+
+function deleteInvestFlow(id){
+  pushUndo();
+  data.investFlows = (data.investFlows||[]).filter(f => f.id !== id);
+  saveNow(); renderInvestments();
 }
 
 function renderAssets(){
