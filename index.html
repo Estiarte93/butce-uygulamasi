@@ -122,8 +122,32 @@ if('serviceWorker' in navigator){
   @keyframes spin{to{transform:rotate(360deg)}}
   .toast{position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);background:#1a1a1a;color:#fff;font-size:13px;padding:9px 18px;border-radius:8px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:200;white-space:nowrap}
   .toast.show{opacity:1}
+  .rep-chips{display:flex;gap:6px;overflow-x:auto;margin-bottom:1rem;padding-bottom:4px;-webkit-overflow-scrolling:touch}
+  .chip{flex-shrink:0;padding:6px 12px;border:0.5px solid #ccc;border-radius:20px;background:#fff;cursor:pointer;font-size:12px;color:#666;white-space:nowrap}
+  .chip.active{background:#1a1a1a;border-color:#1a1a1a;color:#fff}
+  .rep-period{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:0.75rem 1rem}
+  .rep-toggle{display:flex;border:0.5px solid #ccc;border-radius:8px;overflow:hidden}
+  .rep-toggle button{padding:6px 14px;border:none;background:#fff;cursor:pointer;font-size:13px;color:#666}
+  .rep-toggle button.active{background:#ebebeb;color:#1a1a1a;font-weight:500}
+  .grid4{grid-template-columns:repeat(4,1fr)}
+  .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .rep-table{width:100%;border-collapse:collapse;font-size:12px}
+  .rep-table th{font-weight:500;color:#999;text-align:left;padding:6px 8px;border-bottom:0.5px solid #ddd;white-space:nowrap}
+  .rep-table td{padding:7px 8px;border-bottom:0.5px solid #f0f0f0;white-space:nowrap}
+  .rep-table .num{text-align:right}
+  .rep-table tfoot td{font-weight:500;border-top:0.5px solid #ddd;border-bottom:none}
+  .rep-note{font-size:11px;color:#aaa;margin-top:8px}
+  .export-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-top:0.5px solid #eee}
+  .export-row:first-of-type{border-top:none}
+  @media print{
+    body{background:#fff}
+    .btn-undo,.sync-bar,.tabs,.rep-chips,.rep-period button,.rep-toggle,.no-print,.toast{display:none!important}
+    .section{break-inside:avoid;border:none;padding:0.5rem 0}
+    .container{max-width:none;padding:0}
+  }
   @media(max-width:500px){
     .summary-grid{grid-template-columns:1fr 1fr}
+    .grid4{grid-template-columns:1fr 1fr}
     .entry-main{grid-template-columns:1fr auto auto auto}
     .form-grid{grid-template-columns:1fr}
     .upcoming-main{grid-template-columns:1fr auto auto}
@@ -160,6 +184,7 @@ if('serviceWorker' in navigator){
     <button class="tab active" onclick="showPage('dashboard',this)">Özet</button>
     <button class="tab" onclick="showPage('income',this)">Gelir</button>
     <button class="tab" onclick="showPage('expenses',this)">Gider</button>
+    <button class="tab" onclick="showPage('reports',this)">Raporlar</button>
   </div>
 
   <!-- DASHBOARD -->
@@ -410,6 +435,23 @@ if('serviceWorker' in navigator){
       </div>
       <div class="entry-list" id="expense-list"></div>
     </div>
+  </div>
+
+  <!-- REPORTS -->
+  <div id="page-reports" class="page">
+    <div class="rep-chips" id="rep-chips"></div>
+    <div class="section rep-period" id="rep-period">
+      <div class="rep-toggle">
+        <button id="rep-mode-month" onclick="setRepMode('month')">Ay</button>
+        <button id="rep-mode-year" onclick="setRepMode('year')">Yıl</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="btn-nav" onclick="changeRepPeriod(-1)">‹</button>
+        <span id="rep-period-label" style="font-size:13px;font-weight:500;min-width:120px;text-align:center"></span>
+        <button class="btn-nav" onclick="changeRepPeriod(1)">›</button>
+      </div>
+    </div>
+    <div id="rep-body"></div>
   </div>
 </div>
 
@@ -1073,12 +1115,13 @@ function renderPieCharts(){
 }
 
 function renderCharts(){renderBarChart();renderPieCharts();}
-function render(){renderIncomeList();renderExpenseList();renderSummary();renderUpcoming();renderCharts();renderWealth();renderAssets();}
+function render(){renderIncomeList();renderExpenseList();renderSummary();renderUpcoming();renderCharts();renderWealth();renderAssets();if(document.getElementById('page-reports').classList.contains('active'))renderReports();}
 
 function showPage(name,el){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');el.classList.add('active');
+  if(name==='reports')renderReports();
 }
 
 
@@ -1866,6 +1909,442 @@ function deleteInvestFlow(id){
 function renderAssets(){
   renderAssetRatesBar();
   renderAssetSummary();
+}
+
+
+// ── Raporlar ─────────────────────────────────────────────────────
+// Each report is one entry in REPORTS; removing an entry (and its function) removes the report.
+
+const REPORTS=[
+  {id:'summary',    label:'Özet',               period:true,  render:repSummary},
+  {id:'categories', label:'Kategori trendleri', period:true,  render:repCategories},
+  {id:'fixed',      label:'Sabit / Değişken',   period:true,  render:repFixed},
+  {id:'future',     label:'Gelecek ödemeler',   period:false, render:repFuture},
+  {id:'usd',        label:'USD görünümü',       period:true,  render:repUSD},
+  {id:'real',       label:'Reel gelir',         period:true,  render:repReal},
+  {id:'networth',   label:'Net değer',          period:false, render:repNetWorth},
+  {id:'invest',     label:'Yatırım performansı',period:false, render:repInvest},
+  {id:'alloc',      label:'Varlık dağılımı',    period:false, render:repAlloc},
+  {id:'export',     label:'Dışa aktar',         period:true,  render:repExport},
+];
+let repState={view:'summary',mode:'month',y:_n.getFullYear(),m:_n.getMonth()};
+let repTok=0; // guards async reports against a newer render
+
+// Month indexes: idx = year*12 + month
+function curIdx(){const n=new Date();return n.getFullYear()*12+n.getMonth();}
+function ymOf(i){return {y:Math.floor(i/12),m:i%12};}
+function mLabel(i){const {y,m}=ymOf(i);return TR_SHORT[m]+' '+String(y).slice(2);}
+function mLong(i){const {y,m}=ymOf(i);return TR_MONTHS[m]+' '+y;}
+function idxRange(a,b){const out=[];for(let i=a;i<=b;i++)out.push(i);return out;}
+function keyIdx(k){const [y,m]=k.split('-');return parseInt(y)*12+parseInt(m)-1;}
+function rateKey(i){const {y,m}=ymOf(i);return `${y}-${m}`;}
+
+function periodLabel(){
+  const c=ymOf(curIdx());
+  if(repState.mode==='year')return repState.y+(repState.y===c.y?' (bugüne kadar)':'');
+  return TR_MONTHS[repState.m]+' '+repState.y+(repState.y===c.y&&repState.m===c.m?' (bu ay)':'');
+}
+// Months of the selected period (a year is capped at the current month)
+function periodMonths(){
+  if(repState.mode==='month')return [repState.y*12+repState.m];
+  return idxRange(repState.y*12,Math.min(repState.y*12+11,curIdx()));
+}
+// Trend window: the selected year, or the 12 months ending at the selected month
+function windowMonths(){
+  if(repState.mode==='year')return periodMonths();
+  const end=repState.y*12+repState.m;return idxRange(end-11,end);
+}
+function prevPeriodMonths(){return periodMonths().map(i=>repState.mode==='month'?i-1:i-12);}
+
+// Actual (received / paid) items of a month, same rules as the rest of the app
+function actualItems(i){
+  const {y,m}=ymOf(i);
+  return {
+    inc:data.income.filter(e=>isActiveInMonth(e,y,m)&&isIncomeReceived(e,y,m)).map(e=>({e,amt:amountFor(e,y,m)})),
+    exp:data.expenses.filter(e=>isActiveInMonth(e,y,m)&&!isHiddenByEarlyPay(e,y,m)&&isExpensePaid(e,y,m)).map(e=>({e,amt:amountFor(e,y,m)}))
+  };
+}
+// Planned items of a month (everything scheduled, paid or not)
+function plannedItems(i){
+  const {y,m}=ymOf(i);
+  return {
+    inc:data.income.filter(e=>isActiveInMonth(e,y,m)).map(e=>({e,amt:amountFor(e,y,m)})),
+    exp:data.expenses.filter(e=>isActiveInMonth(e,y,m)&&!isHiddenByEarlyPay(e,y,m)).map(e=>({e,amt:amountFor(e,y,m)}))
+  };
+}
+function sumAmt(a){return a.reduce((s,x)=>s+x.amt,0);}
+function monthTotals(i){const it=actualItems(i);const inc=sumAmt(it.inc),exp=sumAmt(it.exp);return {inc,exp,net:inc-exp,rate:inc>0?(inc-exp)/inc:null};}
+function aggTotals(months){let inc=0,exp=0;months.forEach(i=>{const t=monthTotals(i);inc+=t.inc;exp+=t.exp;});return {inc,exp,net:inc-exp,rate:inc>0?(inc-exp)/inc:null};}
+function catTotals(months,kind){
+  const map={};
+  months.forEach(i=>actualItems(i)[kind].forEach(({e,amt})=>{const k=e.category||(kind==='inc'?'diger_gelir':'diger_gider');map[k]=(map[k]||0)+amt;}));
+  return map;
+}
+function isFixed(e){return e.recurring||!!e.earlyPayRef;}
+
+// ── HTML helpers
+function usd(v){return (v<0?'-':'')+'$'+Math.round(Math.abs(v)).toLocaleString('tr-TR');}
+function pctStr(v){return v==null||!isFinite(v)?'—':'%'+(v*100).toLocaleString('tr-TR',{maximumFractionDigits:1});}
+function colored(v,f=fmt){return `<span style="color:${v>=0?'#1D9E75':'#D85A30'}">${f(v)}</span>`;}
+function delta(cur,prev,goodWhenUp=true){
+  if(!prev)return cur?'<span style="color:#aaa">yeni</span>':'';
+  const d=(cur-prev)/Math.abs(prev);const good=goodWhenUp?d>=0:d<=0;
+  return `<span style="color:${good?'#1D9E75':'#D85A30'}">${d>=0?'▲':'▼'} %${Math.abs(d*100).toLocaleString('tr-TR',{maximumFractionDigits:1})}</span>`;
+}
+function card(label,value,sub,cls){return `<div class="metric"><div class="metric-label">${label}</div><div class="metric-value ${cls||''}" style="font-size:18px">${value}</div>${sub?`<div style="font-size:11px;margin-top:4px">${sub}</div>`:''}</div>`;}
+function section(title,inner,note){return `<div class="section"><div class="section-title">${title}</div>${inner}${note?`<div class="rep-note">${note}</div>`:''}</div>`;}
+function table(headers,rows,foot){
+  const cell=(c,i,tag)=>`<${tag} class="${i?'num':''}">${c}</${tag}>`;
+  return `<div class="table-wrap"><table class="rep-table"><thead><tr>${headers.map((h,i)=>cell(h,i,'th')).join('')}</tr></thead>
+    <tbody>${rows.map(r=>`<tr>${r.map((c,i)=>cell(c,i,'td')).join('')}</tr>`).join('')}</tbody>
+    ${foot?`<tfoot><tr>${foot.map((c,i)=>cell(c,i,'td')).join('')}</tr></tfoot>`:''}</table></div>`;
+}
+function catCell(type,k){return `<span class="cat-dot" style="background:${getCatColor(type,k)}"></span>${getCatLabel(type,k)}`;}
+function canvas(id,h=220){return `<div style="position:relative;height:${h}px"><canvas id="${id}"></canvas></div>`;}
+const EMPTY='<div class="empty">Veri yok</div>';
+function chartOpts(fmtY,{stacked=false,legend=true,y1=null,max=null}={}){
+  const o={responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+    plugins:{legend:{display:legend,labels:{boxWidth:10,font:{size:11}}},
+      tooltip:{backgroundColor:'rgba(26,26,26,0.9)',titleColor:'#fff',bodyColor:'#fff',padding:10,cornerRadius:8,
+        callbacks:{label:c=>` ${c.dataset.label}: ${(c.dataset.yAxisID==='y1'&&y1?y1:fmtY)(c.parsed.y)}`}}},
+    scales:{x:{stacked,grid:{display:false},ticks:{font:{size:11},color:'#888'}},
+      y:{stacked,grid:{color:'rgba(0,0,0,0.06)'},ticks:{font:{size:11},color:'#888',callback:v=>fmtY(v)}}}};
+  if(max!=null)o.scales.y.max=max;
+  if(y1)o.scales.y1={position:'right',grid:{display:false},ticks:{font:{size:11},color:'#888',callback:v=>y1(v)}};
+  return o;
+}
+function drawChart(id,type,labels,datasets,opts){const c=document.getElementById(id);if(c)new Chart(c.getContext('2d'),{type,data:{labels,datasets},options:opts});}
+
+// ── Page controls
+function renderReports(){
+  const r=REPORTS.find(x=>x.id===repState.view)||REPORTS[0];
+  if(r.id==='export')repState.mode='year'; // exports cover whole years
+  document.getElementById('rep-chips').innerHTML=REPORTS.map(x=>`<button class="chip${x.id===r.id?' active':''}" onclick="setRepView('${x.id}')">${x.label}</button>`).join('');
+  document.getElementById('rep-period').style.display=r.period?'flex':'none';
+  document.getElementById('rep-mode-month').classList.toggle('active',repState.mode==='month');
+  document.getElementById('rep-mode-year').classList.toggle('active',repState.mode==='year');
+  document.getElementById('rep-mode-month').style.display=r.id==='export'?'none':'';
+  document.getElementById('rep-period-label').textContent=periodLabel();
+  const body=document.getElementById('rep-body');
+  body.querySelectorAll('canvas').forEach(c=>Chart.getChart(c)?.destroy());
+  const tok=++repTok;
+  Promise.resolve().then(()=>r.render(body,tok)).catch(e=>{console.error(e);if(tok===repTok)body.innerHTML=section('Hata','<div class="empty">Rapor oluşturulamadı</div>');});
+}
+function setRepView(id){repState.view=id;renderReports();}
+function setRepMode(mode){repState.mode=mode;clampRep();renderReports();}
+function changeRepPeriod(dir){
+  if(repState.mode==='year')repState.y+=dir;
+  else{const t=ymOf(repState.y*12+repState.m+dir);repState.y=t.y;repState.m=t.m;}
+  clampRep();renderReports();
+}
+function clampRep(){
+  const c=ymOf(curIdx());
+  if(repState.mode==='year'){if(repState.y>c.y)repState.y=c.y;}
+  else if(repState.y*12+repState.m>curIdx()){repState.y=c.y;repState.m=c.m;}
+}
+
+// 1) Monthly / yearly summary
+function repSummary(body){
+  const months=periodMonths(),prev=prevPeriodMonths(),isYear=repState.mode==='year';
+  const cur=aggTotals(months),pv=aggTotals(prev);
+  const rd=cur.rate!=null&&pv.rate!=null?(cur.rate-pv.rate)*100:null;
+  const rateSub=rd==null?'':`<span style="color:${rd>=0?'#1D9E75':'#D85A30'}">${rd>=0?'▲':'▼'} ${Math.abs(rd).toLocaleString('tr-TR',{maximumFractionDigits:1})} puan</span>`;
+  let html=`<div class="summary-grid grid4">
+    ${card('Gelir',fmt(cur.inc),delta(cur.inc,pv.inc,true),'income')}
+    ${card('Gider',fmt(cur.exp),delta(cur.exp,pv.exp,false),'expense')}
+    ${card('Net',fmt(cur.net),delta(cur.net,pv.net,true),cur.net>=0?'pos':'neg')}
+    ${card('Tasarruf oranı',pctStr(cur.rate),rateSub)}
+  </div><div class="rep-note" style="margin:-0.5rem 0 1rem">Değişimler ${isYear?'geçen yılın aynı dönemine':'geçen aya'} göre.</div>`;
+  const catSection=(kind,type,title,total)=>{
+    const cc=catTotals(months,kind),cp=catTotals(prev,kind);
+    const keys=Object.keys({...cc,...cp}).filter(k=>(cc[k]||0)>0||(cp[k]||0)>0).sort((a,b)=>(cc[b]||0)-(cc[a]||0));
+    const rows=keys.map(k=>[catCell(type,k),fmt(cc[k]||0),total?pctStr((cc[k]||0)/total):'—',fmt(cp[k]||0),delta(cc[k]||0,cp[k]||0,kind==='inc')]);
+    return section(title,rows.length?table(['Kategori','Tutar','Pay','Önceki','Değişim'],rows):EMPTY);
+  };
+  html+=catSection('exp','expense','Gider kategorileri',cur.exp);
+  html+=catSection('inc','income','Gelir kategorileri',cur.inc);
+  if(isYear){
+    const rows=months.map(i=>{const t=monthTotals(i);return [TR_MONTHS[ymOf(i).m],fmt(t.inc),fmt(t.exp),colored(t.net),pctStr(t.rate)];});
+    html+=section('Aylara göre',table(['Ay','Gelir','Gider','Net','Oran'],rows,['Toplam',fmt(cur.inc),fmt(cur.exp),colored(cur.net),pctStr(cur.rate)])
+      +`<div class="no-print" style="margin-top:10px"><button class="btn-add" onclick="window.print()">Yazdır / PDF</button></div>`);
+  }
+  body.innerHTML=html;
+}
+
+// 2) Category trends
+function repCategories(body){
+  const months=windowMonths(),last=months[months.length-1],before=months.slice(0,-1);
+  const per=months.map(i=>catTotals([i],'exp'));
+  const totals={};per.forEach(p=>Object.entries(p).forEach(([k,v])=>totals[k]=(totals[k]||0)+v));
+  const keys=Object.keys(totals).filter(k=>totals[k]>0).sort((a,b)=>totals[b]-totals[a]);
+  if(!keys.length){body.innerHTML=section('Gider kategorileri',EMPTY);return;}
+  const rows=keys.map(k=>{
+    const lastV=per[per.length-1][k]||0;
+    const avg=before.length?before.reduce((s,_,j)=>s+(per[j][k]||0),0)/before.length:0;
+    const flag=avg>0&&lastV>avg*1.2?' ⚠️':'';
+    return [catCell('expense',k)+flag,fmt(lastV),fmt(avg),delta(lastV,avg,false),fmt(totals[k])];
+  });
+  body.innerHTML=section(`Gider kategorileri · ${mLabel(months[0])} – ${mLabel(last)}`,canvas('repCatChart',260))
+    +section('Son ay ve ortalama',table(['Kategori',mLabel(last),'Önceki ort.','Fark','Dönem toplamı'],rows),
+      '⚠️ = önceki ayların ortalamasından %20+ fazla. İçinde bulunulan ayda sadece ödenmiş giderler sayılır.');
+  drawChart('repCatChart','bar',months.map(mLabel),keys.map(k=>({label:getCatLabel('expense',k),data:per.map(p=>Math.round(p[k]||0)),backgroundColor:getCatColor('expense',k)})),chartOpts(fmt,{stacked:true}));
+}
+
+// 3) Fixed vs variable costs
+function repFixed(body){
+  const months=periodMonths();
+  let fixed=0,variable=0,inc=0;const fixedBy={},varBy={};
+  months.forEach(i=>{
+    const it=actualItems(i);inc+=sumAmt(it.inc);
+    it.exp.forEach(({e,amt})=>{
+      const orig=e.earlyPayRef?data.expenses.find(x=>x.id===e.earlyPayRef)||e:e;
+      const bucket=isFixed(e)?fixedBy:varBy;
+      if(isFixed(e))fixed+=amt;else variable+=amt;
+      const k=orig.id;bucket[k]=bucket[k]||{name:orig.name,cat:orig.category,amt:0};bucket[k].amt+=amt;
+    });
+  });
+  const total=fixed+variable;
+  const list=by=>Object.values(by).sort((a,b)=>b.amt-a.amt).map(x=>[esc(x.name),x.cat?catCell('expense',x.cat):'—',fmt(x.amt)]);
+  const win=windowMonths();
+  const fv=win.map(i=>{let f=0,v=0;actualItems(i).exp.forEach(({e,amt})=>{if(isFixed(e))f+=amt;else v+=amt;});return {f,v};});
+  body.innerHTML=`<div class="summary-grid grid4">
+      ${card('Sabit giderler',fmt(fixed),'','expense')}
+      ${card('Değişken giderler',fmt(variable))}
+      ${card('Sabit payı',pctStr(total?fixed/total:null),'giderlerin içinde')}
+      ${card('Gelire oranı',pctStr(inc?fixed/inc:null),'gelirin sabit giderlere giden kısmı')}
+    </div>`
+    +section(`Aylara göre · ${mLabel(win[0])} – ${mLabel(win[win.length-1])}`,canvas('repFixedChart'))
+    +section('Sabit giderler',Object.keys(fixedBy).length?table(['Ad','Kategori','Tutar'],list(fixedBy)):EMPTY,'Sabit = aylık tekrarlanan kayıtlar (erken ödemeler dahil).')
+    +section('Değişken giderler',Object.keys(varBy).length?table(['Ad','Kategori','Tutar'],list(varBy)):EMPTY);
+  drawChart('repFixedChart','bar',win.map(mLabel),[
+    {label:'Sabit',data:fv.map(x=>Math.round(x.f)),backgroundColor:'#D85A30'},
+    {label:'Değişken',data:fv.map(x=>Math.round(x.v)),backgroundColor:'#F5B99A'}],chartOpts(fmt,{stacked:true}));
+}
+
+// 4) Upcoming commitments
+function repFuture(body){
+  const c=curIdx(),months=idxRange(c,c+11);
+  const rows=months.map(i=>{const it=plannedItems(i);const inc=sumAmt(it.inc),exp=sumAmt(it.exp);return {i,inc,exp,net:inc-exp};});
+  const sumExp=n=>rows.slice(0,n).reduce((s,r)=>s+r.exp,0);
+  const net12=rows.reduce((s,r)=>s+r.net,0);
+  const ending=[...data.income.map(e=>({e,kind:'Gelir'})),...data.expenses.map(e=>({e,kind:'Gider'}))]
+    .filter(({e})=>e.recurring&&e.duration&&e.duration!=='forever'&&(remainingMonths(e)||0)>0)
+    .map(({e,kind})=>{
+      const start=(e.startYear??ymOf(c).y)*12+(e.startMonth??0),end=start+parseInt(e.duration)-1;
+      const left=idxRange(Math.max(c,start),end).reduce((s,i)=>s+amountFor(e,ymOf(i).y,ymOf(i).m),0);
+      return {e,kind,end,left};
+    }).sort((a,b)=>a.end-b.end);
+  body.innerHTML=`<div class="summary-grid grid4">
+      ${card('Önümüzdeki 3 ay',fmt(sumExp(3)),'planlı gider','expense')}
+      ${card('6 ay',fmt(sumExp(6)),'planlı gider','expense')}
+      ${card('12 ay',fmt(sumExp(12)),'planlı gider','expense')}
+      ${card('12 ay net',fmt(net12),'planlı gelir − gider',net12>=0?'pos':'neg')}
+    </div>`
+    +section('Önümüzdeki 12 ay',canvas('repFutureChart')+table(['Ay','Gelir','Gider','Net'],rows.map(r=>[mLong(r.i),fmt(r.inc),fmt(r.exp),colored(r.net)])),
+      'Bu ay dahil, girilmiş tüm aylık ve tek seferlik kayıtlara göre (ödenmiş olsun olmasın).')
+    +section('Süresi biten ödemeler',ending.length?table(['Ad','Tür','Aylık','Kalan ay','Bitiş','Kalan toplam'],
+      ending.map(x=>[esc(x.e.name),x.kind,fmt(amountFor(x.e,ymOf(c).y,ymOf(c).m)),remainingMonths(x.e),mLong(x.end),fmt(x.left)])):'<div class="empty">Süreli kayıt yok</div>');
+  drawChart('repFutureChart','bar',months.map(mLabel),[
+    {label:'Gelir',data:rows.map(r=>Math.round(r.inc)),backgroundColor:'#1D9E75',order:2},
+    {label:'Gider',data:rows.map(r=>Math.round(r.exp)),backgroundColor:'#D85A30',order:2},
+    {label:'Net',type:'line',data:rows.map(r=>Math.round(r.net)),borderColor:'#1a1a1a',backgroundColor:'#1a1a1a',borderWidth:2,pointRadius:2,order:1}],chartOpts(fmt));
+}
+
+// 5) Income / expenses in USD
+async function repUSD(body,tok){
+  const months=windowMonths();
+  body.innerHTML=section('USD görünümü','<div class="empty">Kurlar yükleniyor...</div>');
+  const rates=await fetchAllMonthRates(months.map(ymOf));
+  if(tok!==repTok)return;
+  let ti=0,te=0,missing=0;
+  const rows=months.map(i=>{
+    const t=monthTotals(i),r=rates[rateKey(i)];
+    if(!r){if(t.inc||t.exp)missing++;return {i,r:null};}
+    const inc=t.inc/r,exp=t.exp/r;ti+=inc;te+=exp;return {i,r,inc,exp,net:inc-exp};
+  });
+  const n=rows.filter(r=>r.r).length;
+  body.innerHTML=`<div class="summary-grid grid4">
+      ${card('Gelir',usd(ti),'','income')}${card('Gider',usd(te),'','expense')}
+      ${card('Net',usd(ti-te),'',ti-te>=0?'pos':'neg')}${card('Aylık ort. net',usd(n?(ti-te)/n:0))}
+    </div>`
+    +section(`Aylara göre (USD) · ${mLabel(months[0])} – ${mLabel(months[months.length-1])}`,canvas('repUsdChart')
+      +table(['Ay','Kur','Gelir','Gider','Net'],rows.map(r=>r.r?[mLong(r.i),r.r.toLocaleString('tr-TR',{maximumFractionDigits:2}),usd(r.inc),usd(r.exp),colored(r.net,usd)]:[mLong(r.i),'—','—','—','—'])),
+      'Her ay kendi ay sonu kuruyla çevrilir (bu ay: bugünün kuru).'+(missing?` ${missing} ayın kuru alınamadı ve toplamlara dahil değil.`:''));
+  drawChart('repUsdChart','bar',months.map(mLabel),[
+    {label:'Gelir',data:rows.map(r=>r.r?Math.round(r.inc):null),backgroundColor:'#1D9E75',order:2},
+    {label:'Gider',data:rows.map(r=>r.r?Math.round(r.exp):null),backgroundColor:'#D85A30',order:2},
+    {label:'Net',type:'line',data:rows.map(r=>r.r?Math.round(r.net):null),borderColor:'#2980b9',backgroundColor:'#2980b9',borderWidth:2,pointRadius:2,order:1}],chartOpts(usd));
+}
+
+// 6) Real income change: TRY vs USD, this window vs the same window a year earlier
+async function repReal(body,tok){
+  const win=windowMonths(),prior=win.map(i=>i-12),last=win[win.length-1];
+  body.innerHTML=section('Reel gelir','<div class="empty">Kurlar yükleniyor...</div>');
+  const rates=await fetchAllMonthRates([...prior,...win].map(ymOf));
+  if(tok!==repTok)return;
+  const totalsFor=ms=>{let incT=0,expT=0,incU=0,expU=0,miss=0;ms.forEach(i=>{const t=monthTotals(i),r=rates[rateKey(i)];incT+=t.inc;expT+=t.exp;if(r){incU+=t.inc/r;expU+=t.exp/r;}else if(t.inc||t.exp)miss++;});return {incT,expT,incU,expU,miss};};
+  const a=totalsFor(win),b=totalsFor(prior);
+  const ch=(x,y)=>y?(x-y)/Math.abs(y):null;
+  const word=v=>v>=0?'arttı':'azaldı';
+  const sentence=b.incT&&b.incU?`Gelirin TRY bazında <b>${pctStr(Math.abs(ch(a.incT,b.incT)))} ${word(ch(a.incT,b.incT))}</b>, USD bazında <b>${pctStr(Math.abs(ch(a.incU,b.incU)))} ${word(ch(a.incU,b.incU))}</b>.`:'Karşılaştırma için bir yıl önceki aylarda da veri gerekli.';
+  const entries=data.income.filter(e=>e.recurring&&isActiveInMonth(e,ymOf(last).y,ymOf(last).m)).map(e=>{
+    const now=amountFor(e,ymOf(last).y,ymOf(last).m),then=isActiveInMonth(e,ymOf(last-12).y,ymOf(last-12).m)?amountFor(e,ymOf(last-12).y,ymOf(last-12).m):null;
+    const rn=rates[rateKey(last)],rt=rates[rateKey(last-12)];
+    return [esc(e.name),then!=null?fmt(then):'—',fmt(now),then?delta(now,then):'—',then&&rn&&rt?delta(now/rn,then/rt):'—'];
+  });
+  const all=[...prior,...win];
+  body.innerHTML=`<div class="summary-grid grid4">
+      ${card('Gelir (₺)',fmt(a.incT),delta(a.incT,b.incT),'income')}
+      ${card('Gelir ($)',usd(a.incU),delta(a.incU,b.incU),'income')}
+      ${card('Gider (₺)',fmt(a.expT),delta(a.expT,b.expT,false),'expense')}
+      ${card('Gider ($)',usd(a.expU),delta(a.expU,b.expU,false),'expense')}
+    </div>`
+    +section(`${mLabel(win[0])} – ${mLabel(last)} ile ${mLabel(prior[0])} – ${mLabel(prior[prior.length-1])} karşılaştırması`,
+      `<div style="font-size:14px;line-height:1.5">${sentence}</div>`,
+      'USD değişimi, TL enflasyonu ve kur etkisinden arındırılmış yaklaşık reel değişimi gösterir.'+(a.miss+b.miss?' Bazı ayların kuru alınamadı.':''))
+    +section('Aylık gelir: TRY ve USD',canvas('repRealChart'))
+    +section(`Tekrarlanan gelirler · ${mLong(last-12)} → ${mLong(last)}`,entries.length?table(['Gelir','Önce','Şimdi','TRY değişim','USD değişim'],entries):EMPTY);
+  drawChart('repRealChart','line',all.map(mLabel),[
+    {label:'Gelir (₺)',data:all.map(i=>Math.round(monthTotals(i).inc)),borderColor:'#1D9E75',backgroundColor:'#1D9E75',borderWidth:2,pointRadius:2,tension:0.3,yAxisID:'y'},
+    {label:'Gelir ($)',data:all.map(i=>{const r=rates[rateKey(i)];return r?Math.round(monthTotals(i).inc/r):null;}),borderColor:'#2980b9',backgroundColor:'#2980b9',borderWidth:2,pointRadius:2,tension:0.3,yAxisID:'y1',spanGaps:true}],
+    chartOpts(fmt,{y1:usd}));
+}
+
+// 7) Net worth history (from monthly asset snapshots)
+function repNetWorth(body){
+  const snaps=data.assetSnapshots||{},keys=Object.keys(snaps).sort();
+  if(!keys.length){body.innerHTML=section('Net değer','<div class="empty">Henüz kayıt yok — Assets sayfasında Kaydet ile aylık kayıt alınır</div>');return;}
+  const rows=keys.map((k,j)=>{const v=snaps[k].totalUSD||0,pv=j?snaps[keys[j-1]].totalUSD||0:null,r=snaps[k].rates?.usdtry;return {k,v,tr:r?v*r:null,chg:pv!=null?v-pv:null,pct:pv?(v-pv)/Math.abs(pv):null};});
+  const lastR=rows[rows.length-1],first=rows[0];
+  const yearAgo=[...rows].reverse().find(r=>keyIdx(r.k)<=keyIdx(lastR.k)-12);
+  body.innerHTML=`<div class="summary-grid grid4">
+      ${card('Son kayıt',usd(lastR.v),mLong(keyIdx(lastR.k)),'income')}
+      ${card('TRY karşılığı',lastR.tr?fmt(lastR.tr):'—')}
+      ${card('İlk kayda göre',colored(lastR.v-first.v,usd),delta(lastR.v,first.v))}
+      ${card('Son 12 ay',yearAgo?colored(lastR.v-yearAgo.v,usd):'—',yearAgo?delta(lastR.v,yearAgo.v):'12 aylık kayıt yok')}
+    </div>`
+    +section('Net değer (USD)',canvas('repNwChart'))
+    +section('Aylık kayıtlar',table(['Ay','USD','TRY','Değişim','%'],[...rows].reverse().map(r=>[mLong(keyIdx(r.k)),usd(r.v),r.tr?fmt(r.tr):'—',r.chg!=null?colored(r.chg,usd):'—',r.pct!=null?delta(r.v,r.v-r.chg):'—'])),
+      'Varlıklar − borçlar. TRY karşılığı o ayın kaydındaki kurla hesaplanır.');
+  drawChart('repNwChart','line',rows.map(r=>mLabel(keyIdx(r.k))),[{label:'Net değer',data:rows.map(r=>Math.round(r.v)),borderColor:'#2980b9',backgroundColor:'rgba(41,128,185,0.08)',fill:true,borderWidth:2,pointRadius:3,tension:0.3}],chartOpts(usd,{legend:false}));
+}
+
+// 8) Investment performance per account
+function repInvest(body){
+  const snaps=data.assetSnapshots||{},curKey=curSnapKey();
+  const accounts=INVEST_CATS.map(cat=>{
+    const pts=Object.keys(snaps).sort().filter(k=>k<curKey&&snaps[k].values?.[cat.id]!=null).map(k=>({k,v:snaps[k].values[cat.id]}));
+    pts.push({k:curKey,v:(data.assetValues||{})[cat.id]||0});
+    const periods=[];
+    for(let j=1;j<pts.length;j++){
+      const {k:k0,v:v0}=pts[j-1],{k:k1,v:v1}=pts[j];
+      if(!v0&&!v1)continue;
+      const flows=netFlows(cat.id,k0,k1),gain=v1-v0-flows,base=v0+flows;
+      periods.push({k:k1,v:v1,flows,gain,pct:base>0?gain/base:null});
+    }
+    const years={};periods.forEach(p=>{const y=p.k.slice(0,4);years[y]=years[y]||{gain:0,growth:1};years[y].gain+=p.gain;if(p.pct!=null)years[y].growth*=1+p.pct;});
+    const allFlows=(data.investFlows||[]).filter(f=>f.account===cat.id).reduce((s,f)=>s+f.amount,0);
+    return {cat,periods,years,allFlows,st:investStats(cat)};
+  });
+  const totV=accounts.reduce((s,a)=>s+a.st.cur,0),totF=accounts.reduce((s,a)=>s+a.allFlows,0),totG=accounts.reduce((s,a)=>s+(a.st.first?.gain||0),0);
+  const labels=[...new Set(accounts.flatMap(a=>a.periods.map(p=>p.k)))].sort();
+  let html=`<div class="summary-grid">
+      ${card('Toplam değer',usd(totV),'','income')}
+      ${card('Net yatırılan',usd(totF),'kayıtlı yatırma − çekme')}
+      ${card('Toplam kazanç',colored(totG,usd),'ilk kayıttan bu yana')}
+    </div>`;
+  html+=labels.length?section('Aylık kazanç (USD)',canvas('repInvChart')):'';
+  accounts.forEach(a=>{
+    const yRows=Object.entries(a.years).sort().reverse().map(([y,v])=>[y,colored(v.gain,usd),pctStr(v.growth-1)]);
+    const pRows=[...a.periods].reverse().map(p=>[mLong(keyIdx(p.k)),usd(p.v),p.flows?usd(p.flows):'—',colored(p.gain,usd),p.pct!=null?pctStr(p.pct):'—']);
+    html+=section(`<span class="cat-dot" style="background:${a.cat.color}"></span>${a.cat.label} · ${usd(a.st.cur)}`,
+      (a.st.first?`<div class="entry-meta" style="margin-bottom:8px">${mLong(keyIdx(a.st.first.key))}'dan beri: ${colored(a.st.first.gain,usd)} (${pctStr(a.st.first.pct)}) · net yatırılan ${usd(a.allFlows)}</div>`:'')
+      +(yRows.length?table(['Yıl','Kazanç','Getiri'],yRows)+'<div style="height:10px"></div>':'')
+      +(pRows.length?table(['Dönem','Değer','Yatırma/çekme','Kazanç','Getiri'],pRows):'<div class="empty">Getiri için en az iki aylık kayıt gerekli</div>'));
+  });
+  body.innerHTML=html+'<div class="rep-note">Kazanç = değer değişimi − yatırma/çekme. Yıllık getiri aylık getirilerin bileşik toplamıdır.</div>';
+  if(labels.length)drawChart('repInvChart','bar',labels.map(k=>mLabel(keyIdx(k))),accounts.map(a=>({label:a.cat.label,backgroundColor:a.cat.color,data:labels.map(k=>{const p=a.periods.find(x=>x.k===k);return p?Math.round(p.gain):null;})})),chartOpts(usd));
+}
+
+// 9) Asset allocation over time
+function repAlloc(body){
+  const snaps=data.assetSnapshots||{},keys=Object.keys(snaps).sort();
+  const cats=ASSET_CATS.filter(c=>!c.debt);
+  if(!keys.length){body.innerHTML=section('Varlık dağılımı','<div class="empty">Henüz kayıt yok — Assets sayfasında Kaydet ile aylık kayıt alınır</div>');return;}
+  const toUsd=(id,v,r)=>!v?0:id==='tl'?(r?.usdtry?v/r.usdtry:null):id==='altin'?(r?.goldUSD?v*r.goldUSD:null):v;
+  let missing=false;
+  const rows=keys.map(k=>{
+    const s=snaps[k],vals={};let total=0;
+    cats.forEach(c=>{let u=toUsd(c.id,s.values?.[c.id],s.rates);if(u==null){missing=true;u=0;}vals[c.id]=u;total+=u;});
+    return {k,vals,total};
+  });
+  const pct=(r,id)=>r.total?r.vals[id]/r.total:0;
+  const first=rows[0],last=rows[rows.length-1];
+  const used=cats.filter(c=>rows.some(r=>r.vals[c.id]>0));
+  body.innerHTML=section('Dağılım (%)',canvas('repAllocChart',240))
+    +section(`${mLong(keyIdx(first.k))} → ${mLong(keyIdx(last.k))}`,table(['Varlık','İlk','Son','Değişim','Son ($)'],
+      used.map(c=>{const d=(pct(last,c.id)-pct(first,c.id))*100;return [`<span class="cat-dot" style="background:${c.color}"></span>${c.label}`,pctStr(pct(first,c.id)),pctStr(pct(last,c.id)),`<span style="color:#666">${d>=0?'+':''}${d.toLocaleString('tr-TR',{maximumFractionDigits:1})} puan</span>`,usd(last.vals[c.id])];})),
+      'Borçlar hariç, USD karşılıklarına göre.'+(missing?' Kuru olmayan kayıtlarda TL/altın hesaba katılmadı.':''));
+  drawChart('repAllocChart','bar',rows.map(r=>mLabel(keyIdx(r.k))),used.map(c=>({label:c.label,backgroundColor:c.color,data:rows.map(r=>Math.round(pct(r,c.id)*1000)/10)})),
+    chartOpts(v=>'%'+v,{stacked:true,max:100}));
+}
+
+// 10) Export
+function repExport(body){
+  const y=repState.y;
+  const row=(title,desc,btn)=>`<div class="export-row"><div><div class="entry-name">${title}</div><div class="entry-meta">${desc}</div></div>${btn}</div>`;
+  body.innerHTML=section(`Dışa aktar · ${y}`,
+    row('İşlemler','Seçili yılın tüm gelir ve giderleri',`<button class="btn-add" onclick="exportTransactions(${y})">CSV</button>`)
+    +row('Aylık özet','Ay ay gelir, gider, net ve tasarruf oranı',`<button class="btn-add" onclick="exportMonthly(${y})">CSV</button>`)
+    +row('Yıllık özet','Yazdırılabilir özet sayfası (PDF olarak kaydedilebilir)',`<button class="btn-add" onclick="printYear(${y})">Yazdır</button>`)
+    +row('Varlık kayıtları','Tüm aylık varlık kayıtları (tüm yıllar)',`<button class="btn-add" onclick="exportAssets()">CSV</button>`)
+    +row('Yatırım hareketleri','Tüm para yatırma / çekme kayıtları',`<button class="btn-add" onclick="exportFlows()">CSV</button>`)
+    +row('Tam yedek','Tüm veriler, geri yüklemek için',`<button class="btn-add" onclick="exportBackup()">JSON</button>`),
+    'CSV dosyaları Excel ve Google Sheets ile açılır (Türkçe Excel için ; ayraçlı).');
+}
+function csvCell(v){
+  if(typeof v==='number')return String(Math.round(v*100)/100).replace('.',',');
+  const s=String(v??'');return /[;"\r\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;
+}
+function downloadFile(name,text,type){
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;
+  document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);
+}
+function downloadCSV(name,rows){downloadFile(name,'﻿'+rows.map(r=>r.map(csvCell).join(';')).join('\r\n'),'text/csv;charset=utf-8');showToast(name+' indirildi');}
+function exportTransactions(y){
+  const rows=[['Tarih','Tür','Ad','Kategori','Tutar (TRY)','Tekrar']];
+  idxRange(y*12,Math.min(y*12+11,curIdx())).forEach(i=>{
+    const {m}=ymOf(i),it=actualItems(i);
+    const add=(list,type,kind)=>list.forEach(({e,amt})=>rows.push([`${y}-${String(m+1).padStart(2,'0')}-${String(effDay(e.payDay,y,m)).padStart(2,'0')}`,kind,e.name,e.category?getCatLabel(type,e.category):'',amt,e.recurring?'Aylık':e.earlyPayRef?'Erken ödeme':'Tek seferlik']));
+    add(it.inc,'income','Gelir');add(it.exp,'expense','Gider');
+  });
+  downloadCSV(`islemler-${y}.csv`,rows);
+}
+function exportMonthly(y){
+  const months=idxRange(y*12,Math.min(y*12+11,curIdx()));
+  const rows=[['Ay','Gelir','Gider','Net','Tasarruf oranı (%)']];
+  months.forEach(i=>{const t=monthTotals(i);rows.push([TR_MONTHS[ymOf(i).m],t.inc,t.exp,t.net,t.rate!=null?t.rate*100:'']);});
+  const a=aggTotals(months);rows.push(['Toplam',a.inc,a.exp,a.net,a.rate!=null?a.rate*100:'']);
+  downloadCSV(`aylik-ozet-${y}.csv`,rows);
+}
+function exportAssets(){
+  const snaps=data.assetSnapshots||{};
+  const rows=[['Ay',...ASSET_CATS.map(c=>`${c.label} (${c.unit})`),'Toplam (USD)','USD/TRY','Altın (USD/gr)']];
+  Object.keys(snaps).sort().forEach(k=>{const s=snaps[k];rows.push([k.slice(0,7),...ASSET_CATS.map(c=>s.values?.[c.id]??''),s.totalUSD??'',s.rates?.usdtry??'',s.rates?.goldUSD??'']);});
+  downloadCSV('varlik-kayitlari.csv',rows);
+}
+function exportFlows(){
+  const rows=[['Tarih','Hesap','Tutar (USD)','Tür']];
+  [...(data.investFlows||[])].sort((a,b)=>a.date.localeCompare(b.date)).forEach(f=>rows.push([f.date,ASSET_CATS.find(c=>c.id===f.account)?.label||f.account,f.amount,f.amount>=0?'Yatırma':'Çekme']));
+  downloadCSV('yatirim-hareketleri.csv',rows);
+}
+function exportBackup(){
+  const d=new Date().toISOString().slice(0,10);
+  downloadFile(`butce-yedek-${d}.json`,JSON.stringify(data,null,2),'application/json');showToast('Yedek indirildi');
+}
+function printYear(y){
+  repState.view='summary';repState.mode='year';repState.y=y;renderReports();
+  setTimeout(()=>window.print(),400);
 }
 
 
