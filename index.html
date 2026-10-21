@@ -1286,6 +1286,7 @@ const ASSET_CATS = [
   {id:'eurobond', label:'Eurobond',  color:'#8e44ad', currency:'USD', unit:'$', placeholder:'örn: 10000'},
   {id:'ibkr',      label:'IBKR',       color:'#c0392b', currency:'USD', unit:'$', placeholder:'örn: 25000'},
   {id:'viennalife',label:'ViennaLife', color:'#16a085', currency:'USD', unit:'$', placeholder:'örn: 10000'},
+  {id:'borc_usd',  label:'Borç USD',   color:'#D85A30', currency:'USD', unit:'$', placeholder:'örn: 3000', debt:true},
 ];
 
 let assetRates = {usdtry: null, goldUSD: null, updatedAt: null};
@@ -1391,7 +1392,8 @@ function toUSD(catId, amount){
 
 function getTotalUSD(){
   const vals = getAssetData();
-  return ASSET_CATS.reduce((s,cat) => s + toUSD(cat.id, vals[cat.id] || 0), 0);
+  // Borç kategorileri toplamdan düşülür
+  return ASSET_CATS.reduce((s,cat) => s + (cat.debt ? -1 : 1) * toUSD(cat.id, vals[cat.id] || 0), 0);
 }
 
 function initAssetInputs(){
@@ -1402,7 +1404,7 @@ function initAssetInputs(){
     <div style="display:grid;grid-template-columns:120px 1fr;gap:8px;align-items:center">
       <div style="display:flex;align-items:center;gap:6px">
         <span style="width:10px;height:10px;border-radius:2px;background:${cat.color};display:inline-block;flex-shrink:0"></span>
-        <span style="font-size:14px;font-weight:500">${cat.label}</span>
+        <span style="font-size:14px;font-weight:500${cat.debt?';color:#D85A30':''}">${cat.label}</span>
         <span style="font-size:11px;color:#aaa">(${cat.unit})</span>
       </div>
       <input id="ai-${cat.id}" type="number" min="0" step="any"
@@ -1447,8 +1449,8 @@ function renderAssetSummary(){
   const totalTRY = assetRates.usdtry ? totalUSD * assetRates.usdtry : 0;
   const totalEl = document.getElementById('at-total');
   const tryEl = document.getElementById('at-total-try');
-  if(totalEl) totalEl.textContent = '$'+Math.round(totalUSD).toLocaleString('tr-TR');
-  if(tryEl) tryEl.textContent = totalTRY ? '₺'+Math.round(totalTRY).toLocaleString('tr-TR') : '—';
+  if(totalEl) totalEl.textContent = (totalUSD<0?'-':'')+'$'+Math.round(Math.abs(totalUSD)).toLocaleString('tr-TR');
+  if(tryEl) tryEl.textContent = totalTRY ? (totalTRY<0?'-':'')+'₺'+Math.round(Math.abs(totalTRY)).toLocaleString('tr-TR') : '—';
 
   renderAssetPie();
   renderAssetLine();
@@ -1457,14 +1459,19 @@ function renderAssetSummary(){
 
 function renderAssetPie(){
   const vals = getAssetData();
-  const entries = ASSET_CATS.map(cat => ({
+  const entries = ASSET_CATS.filter(cat => !cat.debt).map(cat => ({
     label: cat.label,
     color: cat.color,
+    usd: toUSD(cat.id, vals[cat.id] || 0)
+  })).filter(e => e.usd > 0);
+  const debts = ASSET_CATS.filter(cat => cat.debt).map(cat => ({
+    label: cat.label,
     usd: toUSD(cat.id, vals[cat.id] || 0)
   })).filter(e => e.usd > 0);
 
   const legendEl = document.getElementById('asset-pie-legend');
   const total = entries.reduce((s,e) => s+e.usd, 0);
+  const net = total - debts.reduce((s,e) => s+e.usd, 0);
 
   if(!entries.length){
     if(legendEl) legendEl.innerHTML = '<div class="empty">Veri yok</div>';
@@ -1503,9 +1510,16 @@ function renderAssetPie(){
           <span style="font-size:11px;font-weight:500;color:#1a1a1a">$${Math.round(e.usd).toLocaleString('tr-TR')}</span>
         </div>
       </div>`).join('')
+    + debts.map(e => `
+      <div class="pie-legend-item">
+        <div class="pie-legend-left">
+          <span style="color:#D85A30">${e.label}</span>
+        </div>
+        <span style="font-size:11px;font-weight:500;color:#D85A30">-$${Math.round(e.usd).toLocaleString('tr-TR')}</span>
+      </div>`).join('')
     + `<div class="pie-total-bar">
         <span style="font-size:12px;font-weight:500;color:#666">Toplam</span>
-        <span style="font-size:13px;font-weight:500;color:#1a1a1a">$${Math.round(total).toLocaleString('tr-TR')}</span>
+        <span style="font-size:13px;font-weight:500;color:#1a1a1a">${net<0?'-':''}$${Math.round(Math.abs(net)).toLocaleString('tr-TR')}</span>
        </div>`;
   }
 }
