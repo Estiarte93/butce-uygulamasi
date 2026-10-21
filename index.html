@@ -1918,8 +1918,6 @@ function renderAssets(){
 const REPORTS=[
   {id:'summary',    label:'Özet',               period:true,  render:repSummary},
   {id:'categories', label:'Kategori trendleri', period:true,  render:repCategories},
-  {id:'fixed',      label:'Sabit / Değişken',   period:true,  render:repFixed},
-  {id:'future',     label:'Gelecek ödemeler',   period:false, render:repFuture},
   {id:'usd',        label:'USD görünümü',       period:true,  render:repUSD},
   {id:'real',       label:'Reel gelir',         period:true,  render:repReal},
   {id:'networth',   label:'Net değer',          period:false, render:repNetWorth},
@@ -1964,14 +1962,6 @@ function actualItems(i){
     exp:data.expenses.filter(e=>isActiveInMonth(e,y,m)&&!isHiddenByEarlyPay(e,y,m)&&isExpensePaid(e,y,m)).map(e=>({e,amt:amountFor(e,y,m)}))
   };
 }
-// Planned items of a month (everything scheduled, paid or not)
-function plannedItems(i){
-  const {y,m}=ymOf(i);
-  return {
-    inc:data.income.filter(e=>isActiveInMonth(e,y,m)).map(e=>({e,amt:amountFor(e,y,m)})),
-    exp:data.expenses.filter(e=>isActiveInMonth(e,y,m)&&!isHiddenByEarlyPay(e,y,m)).map(e=>({e,amt:amountFor(e,y,m)}))
-  };
-}
 function sumAmt(a){return a.reduce((s,x)=>s+x.amt,0);}
 function monthTotals(i){const it=actualItems(i);const inc=sumAmt(it.inc),exp=sumAmt(it.exp);return {inc,exp,net:inc-exp,rate:inc>0?(inc-exp)/inc:null};}
 function aggTotals(months){let inc=0,exp=0;months.forEach(i=>{const t=monthTotals(i);inc+=t.inc;exp+=t.exp;});return {inc,exp,net:inc-exp,rate:inc>0?(inc-exp)/inc:null};}
@@ -1980,7 +1970,6 @@ function catTotals(months,kind){
   months.forEach(i=>actualItems(i)[kind].forEach(({e,amt})=>{const k=e.category||(kind==='inc'?'diger_gelir':'diger_gider');map[k]=(map[k]||0)+amt;}));
   return map;
 }
-function isFixed(e){return e.recurring||!!e.earlyPayRef;}
 
 // ── HTML helpers
 function usd(v){return (v<0?'-':'')+'$'+Math.round(Math.abs(v)).toLocaleString('tr-TR');}
@@ -2090,67 +2079,7 @@ function repCategories(body){
   drawChart('repCatChart','bar',months.map(mLabel),keys.map(k=>({label:getCatLabel('expense',k),data:per.map(p=>Math.round(p[k]||0)),backgroundColor:getCatColor('expense',k)})),chartOpts(fmt,{stacked:true}));
 }
 
-// 3) Fixed vs variable costs
-function repFixed(body){
-  const months=periodMonths();
-  let fixed=0,variable=0,inc=0;const fixedBy={},varBy={};
-  months.forEach(i=>{
-    const it=actualItems(i);inc+=sumAmt(it.inc);
-    it.exp.forEach(({e,amt})=>{
-      const orig=e.earlyPayRef?data.expenses.find(x=>x.id===e.earlyPayRef)||e:e;
-      const bucket=isFixed(e)?fixedBy:varBy;
-      if(isFixed(e))fixed+=amt;else variable+=amt;
-      const k=orig.id;bucket[k]=bucket[k]||{name:orig.name,cat:orig.category,amt:0};bucket[k].amt+=amt;
-    });
-  });
-  const total=fixed+variable;
-  const list=by=>Object.values(by).sort((a,b)=>b.amt-a.amt).map(x=>[esc(x.name),x.cat?catCell('expense',x.cat):'—',fmt(x.amt)]);
-  const win=windowMonths();
-  const fv=win.map(i=>{let f=0,v=0;actualItems(i).exp.forEach(({e,amt})=>{if(isFixed(e))f+=amt;else v+=amt;});return {f,v};});
-  body.innerHTML=`<div class="summary-grid grid4">
-      ${card('Sabit giderler',fmt(fixed),'','expense')}
-      ${card('Değişken giderler',fmt(variable))}
-      ${card('Sabit payı',pctStr(total?fixed/total:null),'giderlerin içinde')}
-      ${card('Gelire oranı',pctStr(inc?fixed/inc:null),'gelirin sabit giderlere giden kısmı')}
-    </div>`
-    +section(`Aylara göre · ${mLabel(win[0])} – ${mLabel(win[win.length-1])}`,canvas('repFixedChart'))
-    +section('Sabit giderler',Object.keys(fixedBy).length?table(['Ad','Kategori','Tutar'],list(fixedBy)):EMPTY,'Sabit = aylık tekrarlanan kayıtlar (erken ödemeler dahil).')
-    +section('Değişken giderler',Object.keys(varBy).length?table(['Ad','Kategori','Tutar'],list(varBy)):EMPTY);
-  drawChart('repFixedChart','bar',win.map(mLabel),[
-    {label:'Sabit',data:fv.map(x=>Math.round(x.f)),backgroundColor:'#D85A30'},
-    {label:'Değişken',data:fv.map(x=>Math.round(x.v)),backgroundColor:'#F5B99A'}],chartOpts(fmt,{stacked:true}));
-}
-
-// 4) Upcoming commitments
-function repFuture(body){
-  const c=curIdx(),months=idxRange(c,c+11);
-  const rows=months.map(i=>{const it=plannedItems(i);const inc=sumAmt(it.inc),exp=sumAmt(it.exp);return {i,inc,exp,net:inc-exp};});
-  const sumExp=n=>rows.slice(0,n).reduce((s,r)=>s+r.exp,0);
-  const net12=rows.reduce((s,r)=>s+r.net,0);
-  const ending=[...data.income.map(e=>({e,kind:'Gelir'})),...data.expenses.map(e=>({e,kind:'Gider'}))]
-    .filter(({e})=>e.recurring&&e.duration&&e.duration!=='forever'&&(remainingMonths(e)||0)>0)
-    .map(({e,kind})=>{
-      const start=(e.startYear??ymOf(c).y)*12+(e.startMonth??0),end=start+parseInt(e.duration)-1;
-      const left=idxRange(Math.max(c,start),end).reduce((s,i)=>s+amountFor(e,ymOf(i).y,ymOf(i).m),0);
-      return {e,kind,end,left};
-    }).sort((a,b)=>a.end-b.end);
-  body.innerHTML=`<div class="summary-grid grid4">
-      ${card('Önümüzdeki 3 ay',fmt(sumExp(3)),'planlı gider','expense')}
-      ${card('6 ay',fmt(sumExp(6)),'planlı gider','expense')}
-      ${card('12 ay',fmt(sumExp(12)),'planlı gider','expense')}
-      ${card('12 ay net',fmt(net12),'planlı gelir − gider',net12>=0?'pos':'neg')}
-    </div>`
-    +section('Önümüzdeki 12 ay',canvas('repFutureChart')+table(['Ay','Gelir','Gider','Net'],rows.map(r=>[mLong(r.i),fmt(r.inc),fmt(r.exp),colored(r.net)])),
-      'Bu ay dahil, girilmiş tüm aylık ve tek seferlik kayıtlara göre (ödenmiş olsun olmasın).')
-    +section('Süresi biten ödemeler',ending.length?table(['Ad','Tür','Aylık','Kalan ay','Bitiş','Kalan toplam'],
-      ending.map(x=>[esc(x.e.name),x.kind,fmt(amountFor(x.e,ymOf(c).y,ymOf(c).m)),remainingMonths(x.e),mLong(x.end),fmt(x.left)])):'<div class="empty">Süreli kayıt yok</div>');
-  drawChart('repFutureChart','bar',months.map(mLabel),[
-    {label:'Gelir',data:rows.map(r=>Math.round(r.inc)),backgroundColor:'#1D9E75',order:2},
-    {label:'Gider',data:rows.map(r=>Math.round(r.exp)),backgroundColor:'#D85A30',order:2},
-    {label:'Net',type:'line',data:rows.map(r=>Math.round(r.net)),borderColor:'#1a1a1a',backgroundColor:'#1a1a1a',borderWidth:2,pointRadius:2,order:1}],chartOpts(fmt));
-}
-
-// 5) Income / expenses in USD
+// 3) Income / expenses in USD
 async function repUSD(body,tok){
   const months=windowMonths();
   body.innerHTML=section('USD görünümü','<div class="empty">Kurlar yükleniyor...</div>');
@@ -2176,7 +2105,7 @@ async function repUSD(body,tok){
     {label:'Net',type:'line',data:rows.map(r=>r.r?Math.round(r.net):null),borderColor:'#2980b9',backgroundColor:'#2980b9',borderWidth:2,pointRadius:2,order:1}],chartOpts(usd));
 }
 
-// 6) Real income change: TRY vs USD, this window vs the same window a year earlier
+// 4) Real income change: TRY vs USD, this window vs the same window a year earlier
 async function repReal(body,tok){
   const win=windowMonths(),prior=win.map(i=>i-12),last=win[win.length-1];
   body.innerHTML=section('Reel gelir','<div class="empty">Kurlar yükleniyor...</div>');
@@ -2210,7 +2139,7 @@ async function repReal(body,tok){
     chartOpts(fmt,{y1:usd}));
 }
 
-// 7) Net worth history (from monthly asset snapshots)
+// 5) Net worth history (from monthly asset snapshots)
 function repNetWorth(body){
   const snaps=data.assetSnapshots||{},keys=Object.keys(snaps).sort();
   if(!keys.length){body.innerHTML=section('Net değer','<div class="empty">Henüz kayıt yok — Assets sayfasında Kaydet ile aylık kayıt alınır</div>');return;}
@@ -2229,7 +2158,7 @@ function repNetWorth(body){
   drawChart('repNwChart','line',rows.map(r=>mLabel(keyIdx(r.k))),[{label:'Net değer',data:rows.map(r=>Math.round(r.v)),borderColor:'#2980b9',backgroundColor:'rgba(41,128,185,0.08)',fill:true,borderWidth:2,pointRadius:3,tension:0.3}],chartOpts(usd,{legend:false}));
 }
 
-// 8) Investment performance per account
+// 6) Investment performance per account
 function repInvest(body){
   const snaps=data.assetSnapshots||{},curKey=curSnapKey();
   const accounts=INVEST_CATS.map(cat=>{
@@ -2266,7 +2195,7 @@ function repInvest(body){
   if(labels.length)drawChart('repInvChart','bar',labels.map(k=>mLabel(keyIdx(k))),accounts.map(a=>({label:a.cat.label,backgroundColor:a.cat.color,data:labels.map(k=>{const p=a.periods.find(x=>x.k===k);return p?Math.round(p.gain):null;})})),chartOpts(usd));
 }
 
-// 9) Asset allocation over time
+// 7) Asset allocation over time
 function repAlloc(body){
   const snaps=data.assetSnapshots||{},keys=Object.keys(snaps).sort();
   const cats=ASSET_CATS.filter(c=>!c.debt);
@@ -2289,7 +2218,7 @@ function repAlloc(body){
     chartOpts(v=>'%'+v,{stacked:true,max:100}));
 }
 
-// 10) Export
+// 8) Export
 function repExport(body){
   const y=repState.y;
   const row=(title,desc,btn)=>`<div class="export-row"><div><div class="entry-name">${title}</div><div class="entry-meta">${desc}</div></div>${btn}</div>`;
